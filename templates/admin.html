@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="pagehead">
+  <div>
+    <p class="eyebrow">ADMIN</p>
+    <h1>NovaEarn Admin Dashboard</h1>
+    <p class="muted">Review users, deposits and withdrawals.</p>
+  </div>
+  <a class="btn" href="/dashboard">Dashboard</a>
+</div>
+
+<div class="stats">
+  <div><small>Registered users</small><strong>{{ users|length }}</strong></div>
+  <div><small>Pending deposits</small><strong>{{ deposits|selectattr('status','equalto','pending')|list|length }}</strong></div>
+  <div><small>Pending withdrawals</small><strong>{{ withdrawals|selectattr('status','equalto','pending')|list|length }}</strong></div>
+</div>
+
+<section>
+  <div class="sectionhead"><h2>Users</h2></div>
+  <div class="table">
+    <table>
+      <tr><th>Name</th><th>Email</th><th>Balance</th><th>Joined</th></tr>
+      {% for u in users %}
+      <tr>
+        <td>{{ u.name }}</td>
+        <td>{{ u.email }}</td>
+        <td>₦{{ "{:,}".format(u.balance) }}</td>
+        <td>{{ u.created_at[:16] if u.created_at else "—" }}</td>
+      </tr>
+      {% else %}<tr><td colspan="4">No users yet.</td></tr>{% endfor %}
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="sectionhead"><h2>Deposits</h2></div>
+  <div class="table">
+    <table>
+      <tr><th>User</th><th>Amount</th><th>Provider</th><th>Reference</th><th>Status</th><th>Action</th></tr>
+      {% for d in deposits %}
+      <tr>
+        <td>{{ d.user_name }}<br><small>{{ d.user_email }}</small></td>
+        <td>₦{{ "{:,}".format(d.amount) }}</td>
+        <td>{{ d.provider }}</td>
+        <td>{{ d.reference }}</td>
+        <td><span class="status">{{ d.status }}</span></td>
+        <td>
+          {% if d.status == 'pending' %}
+          <form method="post" action="/admin/deposit/{{ d.id }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="btn" name="action" value="approve" type="submit">Approve</button>
+            <button class="btn" name="action" value="reject" type="submit">Reject</button>
+          </form>
+          {% else %}—{% endif %}
+        </td>
+      </tr>
+      {% else %}<tr><td colspan="6">No deposits yet.</td></tr>{% endfor %}
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="sectionhead"><h2>Withdrawals</h2></div>
+  <div class="table">
+    <table>
+      <tr><th>User</th><th>Amount</th><th>Destination</th><th>Status</th><th>Action</th></tr>
+      {% for w in withdrawals %}
+      <tr>
+        <td>{{ w.user_name }}<br><small>{{ w.user_email }}</small></td>
+        <td>₦{{ "{:,}".format(w.amount) }}</td>
+        <td>{{ w.destination }} {{ w.destination_number }}</td>
+        <td><span class="status">{{ w.status }}</span></td>
+        <td>
+          {% if w.status == 'pending' %}
+          <form method="post" action="/admin/withdrawal/{{ w.id }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button class="btn" name="action" value="approve" type="submit">Approve</button>
+            <button class="btn" name="action" value="reject" type="submit">Reject</button>
+          </form>
+          {% else %}—{% endif %}
+        </td>
+      </tr>
+      {% else %}<tr><td colspan="5">No withdrawals yet.</td></tr>{% endfor %}
+    </table>
+  </div>
+</section>
+{% endblock %}
