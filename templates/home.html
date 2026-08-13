@@ -1,4 +1,39 @@
-{% extends "base.html" %}{% block content %}
-<div class="card"><h1>NovaEarn</h1><p class="muted">Investment and wallet platform.</p>{% if logged %}<a class="btn" href="{{ url_for('dashboard') }}">Open dashboard</a>{% else %}<a class="btn" href="{{ url_for('register') }}">Create account</a>{% endif %}</div>
-<h2>Investment plans</h2><div class="grid">{% for p in plans %}<div class="card"><h3>{{ p[1] }}</h3><p>₦{{ '{:,}'.format(p[2]) }} · {{ p[3] }} days</p><p><strong>Projected maturity value: ₦{{ '{:,}'.format(p[4]) }}</strong></p></div>{% endfor %}</div>
+{% extends "base.html" %}
+{% block content %}
+<section class="hero">
+  <p class="eyebrow">WELCOME TO NOVA EARN</p>
+  <h1>Build your Nova Earn journey.</h1>
+  <p>Manage your account, wallet, investments and referrals from one clean dashboard.</p>
+  <div class="actions">
+    {% if logged %}
+      <a class="btn" href="{{ url_for('dashboard') }}">Open dashboard</a>
+      <a class="btn secondary" href="{{ url_for('referral') }}">Refer &amp; earn ₦500</a>
+    {% else %}
+      <a class="btn" href="{{ url_for('register') }}">Create account</a>
+      <a class="btn secondary" href="{{ url_for('login') }}">Login</a>
+    {% endif %}
+  </div>
+</section>
+
+<div class="section-head">
+  <div><h2>Investment plans</h2><p>Review the available plans and their displayed maturity values.</p></div>
+</div>
+
+<div class="grid">
+  {% for p in plans %}
+  <article class="card plan-card">
+    <h3>{{ p[1] }}</h3>
+    <div class="plan-price">₦{{ '{:,}'.format(p[2]) }}</div>
+    <div class="plan-days">{{ p[3] }} days</div>
+    <div class="maturity">Projected maturity value<strong>₦{{ '{:,}'.format(p[4]) }}</strong></div>
+  </article>
+  {% endfor %}
+</div>
+
+<section class="card" style="margin-top:28px;text-align:center">
+  <p class="eyebrow">REFERRALS</p>
+  <h2 style="margin:0 0 8px">Invest. Refer. Earn ₦500.</h2>
+  <p class="muted" style="max-width:650px;margin:0 auto">Share your referral link with friends and track eligible referral rewards from your account.</p>
+  {% if not logged %}<div style="margin-top:18px"><a class="btn" href="{{ url_for('register') }}">Get started</a></div>{% endif %}
+</section>
 {% endblock %}
