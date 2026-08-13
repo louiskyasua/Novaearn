@@ -20,7 +20,11 @@
   {% if logged %}
     <a href="{{ url_for('dashboard') }}">Dashboard</a><a href="{{ url_for('wallet') }}">Wallet</a>
     <a href="{{ url_for('investments') }}">Investments</a><a href="{{ url_for('transactions') }}">Transactions</a>
-    <a href="{{ url_for('referral') }}">Referral</a><a href="{{ url_for('profile') }}">Profile</a><a href="{{ url_for('logout') }}">Logout</a>
+    <a href="{{ url_for('referral') }}">Referral</a><a href="{{ url_for('profile') }}">Profile</a>
+    <form method="post" action="{{ url_for('logout') }}" style="display:inline;margin:0;padding:0">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" style="width:auto;margin:0;padding:0;background:none;color:#2457c5;border:0;cursor:pointer">Logout</button>
+    </form>
   {% else %}
     <a href="{{ url_for('login') }}">Login</a><a href="{{ url_for('register') }}">Register</a>
   {% endif %}
