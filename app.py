@@ -18,6 +18,7 @@ from datetime import datetime, timedelta
 from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
 
+import config as nova_config
 from config import ALLOWED_PAYMENT_PROVIDERS, PAYMENT_ACCOUNTS
 
 
@@ -1209,6 +1210,10 @@ def bad_request(error):
         400,
     )
 
+
+# The admin route function has the same historical name as the payment
+# configuration variable. Restore the configured list after route registration.
+PAYMENT_ACCOUNTS = nova_config.PAYMENT_ACCOUNTS
 
 init_db()
 
