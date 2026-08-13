@@ -88,6 +88,7 @@ NIGERIAN_BANKS = [
     {"name": "Zenith Bank", "code": "057"},
 ]
 BANK_CODES = {bank["code"] for bank in NIGERIAN_BANKS}
+BANK_DESTINATIONS = {bank["name"] for bank in NIGERIAN_BANKS}
 
 
 def db():
@@ -158,6 +159,7 @@ def protect_state_changing_requests():
     protected_endpoints = {
         "register",
         "login",
+        "logout",
         "invest",
         "deposit",
         "deposit_payment",
@@ -555,7 +557,7 @@ def login():
     return render_template("auth.html", mode="login")
 
 
-@app.route("/logout")
+@app.route("/logout", methods=["POST"])
 def logout():
     session.clear()
     return redirect(url_for("home"))
@@ -819,7 +821,7 @@ def withdraw():
             "OPay",
             "PalmPay",
             "Moniepoint",
-        }
+        } | BANK_DESTINATIONS
         if not 1500 <= amount <= 800000:
             flash("Withdrawal amount must be between ₦1,500 and ₦800,000.")
             return redirect(url_for("withdraw"))
@@ -829,7 +831,7 @@ def withdraw():
         if not destination_number.isdigit():
             flash("Account number must contain digits only.")
             return redirect(url_for("withdraw"))
-        if destination == "Bank account":
+        if destination == "Bank account" or destination in BANK_DESTINATIONS:
             if bank_code not in BANK_CODES:
                 flash("Please select a valid bank.")
                 return redirect(url_for("withdraw"))
