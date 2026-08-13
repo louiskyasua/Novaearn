@@ -18,6 +18,8 @@ from datetime import datetime, timedelta
 from functools import wraps
 from werkzeug.security import generate_password_hash, check_password_hash
 
+from config import ALLOWED_PAYMENT_PROVIDERS, PAYMENT_ACCOUNTS
+
 
 app = Flask(__name__)
 
@@ -28,17 +30,23 @@ if os.environ.get("FLASK_ENV") == "production" and not SECRET_KEY:
 
 if not SECRET_KEY:
     SECRET_KEY = secrets.token_hex(32)
-    print("WARNING: NOVA_EARN_SECRET is not configured. A temporary secret was generated for this process.")
+    print(
+        "WARNING: NOVA_EARN_SECRET is not configured. "
+        "A temporary secret was generated for this process."
+    )
 
 app.secret_key = SECRET_KEY
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
-    SESSION_COOKIE_SECURE=os.environ.get("NOVA_COOKIE_SECURE", "0").lower() in {"1", "true", "yes"},
+    SESSION_COOKIE_SECURE=os.environ.get("NOVA_COOKIE_SECURE", "0").lower()
+    in {"1", "true", "yes"},
     MAX_CONTENT_LENGTH=2 * 1024 * 1024,
 )
 
-DB = "novaearn.db"
+DATA_DIR = os.environ.get("NOVA_DATA_DIR", "instance")
+os.makedirs(DATA_DIR, exist_ok=True)
+DB = os.environ.get("NOVA_DB_PATH", os.path.join(DATA_DIR, "novaearn.db"))
 
 PLANS = [
     (1, "Starter", 5000, 28, 15000),
@@ -47,12 +55,6 @@ PLANS = [
     (4, "Gold", 20000, 14, 60000),
     (5, "Platinum", 25000, 14, 75000),
     (6, "Diamond", 30000, 7, 90000),
-]
-
-PAYMENT_ACCOUNTS = [
-    {"provider": "OPay", "account_number": "8165007435"},
-    {"provider": "PalmPay", "account_number": "8165007435"},
-    {"provider": "Moniepoint", "account_number": "7070777834"},
 ]
 
 NIGERIAN_BANKS = [
@@ -91,6 +93,7 @@ def db():
     connection = sqlite3.connect(DB, timeout=10)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys = ON")
+    connection.execute("PRAGMA busy_timeout = 10000")
     return connection
 
 
@@ -125,13 +128,25 @@ def get_csrf_token():
 
 @app.context_processor
 def security_context():
-    return {"csrf_token": get_csrf_token(), "logged": "uid" in session, "user_name": session.get("name")}
+    return {
+        "csrf_token": get_csrf_token(),
+        "logged": "uid" in session,
+        "user_name": session.get("name"),
+    }
 
 
 def validate_csrf():
-    supplied = request.form.get("csrf_token") or request.headers.get("X-CSRFToken") or request.headers.get("X-CSRF-Token")
+    supplied = (
+        request.form.get("csrf_token")
+        or request.headers.get("X-CSRFToken")
+        or request.headers.get("X-CSRF-Token")
+    )
     expected = session.get("_csrf_token")
-    if not supplied or not expected or not secrets.compare_digest(supplied, expected):
+    if (
+        not supplied
+        or not expected
+        or not secrets.compare_digest(supplied, expected)
+    ):
         abort(400, description="Invalid or missing CSRF token.")
 
 
@@ -140,8 +155,15 @@ def protect_state_changing_requests():
     if request.method != "POST":
         return
     protected_endpoints = {
-        "register", "login", "invest", "deposit", "deposit_payment", "withdraw",
-        "profile", "admin_update_deposit", "admin_update_withdrawal",
+        "register",
+        "login",
+        "invest",
+        "deposit",
+        "deposit_payment",
+        "withdraw",
+        "profile",
+        "admin_update_deposit",
+        "admin_update_withdrawal",
     }
     if request.endpoint in protected_endpoints:
         validate_csrf()
@@ -152,15 +174,20 @@ def add_security_headers(response):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "SAMEORIGIN"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["Permissions-Policy"] = (
+        "camera=(), microphone=(), geolocation=()"
+    )
     if request.is_secure:
-        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        response.headers["Strict-Transport-Security"] = (
+            "max-age=31536000; includeSubDomains"
+        )
     return response
 
 
 def init_db():
     c = db()
-    c.executescript("""
+    c.executescript(
+        """
         CREATE TABLE IF NOT EXISTS users(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
@@ -209,9 +236,13 @@ def init_db():
             note TEXT,
             created_at TEXT
         );
-    """)
+        """
+    )
 
-    user_columns = {row[1] for row in c.execute("PRAGMA table_info(users)").fetchall()}
+    user_columns = {
+        row[1]
+        for row in c.execute("PRAGMA table_info(users)").fetchall()
+    }
     if "referral_code" not in user_columns:
         c.execute("ALTER TABLE users ADD COLUMN referral_code TEXT")
     if "referred_by" not in user_columns:
@@ -219,22 +250,109 @@ def init_db():
     if "role" not in user_columns:
         c.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'")
 
-    withdrawal_columns = {row[1] for row in c.execute("PRAGMA table_info(withdrawals)").fetchall()}
+    withdrawal_columns = {
+        row[1]
+        for row in c.execute("PRAGMA table_info(withdrawals)").fetchall()
+    }
     if "bank_code" not in withdrawal_columns:
         c.execute("ALTER TABLE withdrawals ADD COLUMN bank_code TEXT")
 
     existing = c.execute("SELECT id, name FROM users ORDER BY id").fetchall()
     for position, row in enumerate(existing, start=1):
-        clean_name = "".join(ch for ch in (row["name"] or "USER").upper() if ch.isalnum())[:12] or "USER"
-        c.execute("UPDATE users SET referral_code=? WHERE id=? AND (referral_code IS NULL OR referral_code='')", (f"{clean_name}{position:03d}", row["id"]))
+        clean_name = "".join(
+            ch for ch in (row["name"] or "USER").upper() if ch.isalnum()
+        )[:12] or "USER"
+        c.execute(
+            """
+            UPDATE users
+            SET referral_code=?
+            WHERE id=?
+            AND (referral_code IS NULL OR referral_code='')
+            """,
+            (f"{clean_name}{position:03d}", row["id"]),
+        )
 
-    admin_email = os.environ.get("NOVA_ADMIN_EMAIL", "admin@novaearn.test")
+    admin_email = os.environ.get("NOVA_ADMIN_EMAIL")
     admin_password = os.environ.get("NOVA_ADMIN_PASSWORD")
-    existing_admin = c.execute("SELECT id FROM users WHERE email=?", (admin_email,)).fetchone()
-    if not existing_admin and admin_password:
-        c.execute("INSERT INTO users(name,email,password,created_at,role) VALUES(?,?,?,?,?)", ("NovaEarn Admin", admin_email, hash_password(admin_password), datetime.now().isoformat(), "admin"))
+    if admin_email and admin_password:
+        existing_admin = c.execute(
+            "SELECT id FROM users WHERE email=?",
+            (admin_email,),
+        ).fetchone()
+        if not existing_admin:
+            c.execute(
+                """
+                INSERT INTO users(name,email,password,created_at,role)
+                VALUES(?,?,?,?,?)
+                """,
+                (
+                    "NovaEarn Admin",
+                    admin_email,
+                    hash_password(admin_password),
+                    datetime.now().isoformat(),
+                    "admin",
+                ),
+            )
+
     c.commit()
     c.close()
+
+
+def settle_matured_investments(c, user_id=None):
+    now = datetime.now().isoformat()
+    query = """
+        SELECT i.*, u.id AS owner_id
+        FROM investments i
+        JOIN users u ON u.id=i.user_id
+        WHERE i.status='active' AND i.maturity_at<=?
+    """
+    params = [now]
+    if user_id is not None:
+        query += " AND i.user_id=?"
+        params.append(user_id)
+
+    matured = c.execute(query, params).fetchall()
+
+    for investment in matured:
+        plan = next(
+            (p for p in PLANS if p[0] == investment["plan_id"]),
+            None,
+        )
+        if not plan:
+            continue
+
+        result = c.execute(
+            """
+            UPDATE investments
+            SET status='matured'
+            WHERE id=? AND status='active'
+            """,
+            (investment["id"],),
+        )
+        if result.rowcount != 1:
+            continue
+
+        maturity_value = plan[4]
+        c.execute(
+            "UPDATE users SET balance=balance+? WHERE id=?",
+            (maturity_value, investment["owner_id"]),
+        )
+        c.execute(
+            """
+            INSERT INTO transactions(
+                user_id, kind, amount, note, created_at
+            )
+            VALUES(?,?,?,?,?)
+            """,
+            (
+                investment["owner_id"],
+                "INVESTMENT_MATURED",
+                maturity_value,
+                f"{plan[1]} investment matured",
+                datetime.now().isoformat(),
+            ),
+        )
+
 
 LOGIN_ATTEMPTS = {}
 LOGIN_WINDOW = 300
@@ -276,7 +394,10 @@ def current():
         session.clear()
         return None
     c = db()
-    u = c.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
+    u = c.execute(
+        "SELECT * FROM users WHERE id=?",
+        (user_id,),
+    ).fetchone()
     c.close()
     if not u:
         session.clear()
@@ -303,6 +424,14 @@ def admin_required(view):
     return wrapped
 
 
+@app.route("/healthz")
+def healthz():
+    c = db()
+    c.execute("SELECT 1").fetchone()
+    c.close()
+    return jsonify({"status": "ok"})
+
+
 @app.route("/")
 def home():
     return render_template("home.html", plans=PLANS)
@@ -318,7 +447,9 @@ def register():
         n = request.form.get("name", "").strip()
         e = request.form.get("email", "").strip().lower()
         p = request.form.get("password", "")
-        referral_code = request.form.get("ref", session.get("pending_referral", "")).strip().upper()
+        referral_code = request.form.get(
+            "ref", session.get("pending_referral", "")
+        ).strip().upper()
         if len(n) < 2 or len(n) > 100:
             flash("Enter a valid name.")
             return redirect(url_for("register"))
@@ -332,17 +463,38 @@ def register():
         try:
             referrer = None
             if referral_code:
-                referrer = c.execute("SELECT id FROM users WHERE referral_code=?", (referral_code,)).fetchone()
+                referrer = c.execute(
+                    "SELECT id FROM users WHERE referral_code=?",
+                    (referral_code,),
+                ).fetchone()
                 if not referrer:
                     flash("Invalid referral code. You can register without one.")
                     referral_code = ""
-            position = c.execute("SELECT COALESCE(MAX(id), 0) + 1 FROM users").fetchone()[0]
-            clean_name = "".join(ch for ch in n.upper() if ch.isalnum())[:12] or "USER"
+            position = c.execute(
+                "SELECT COALESCE(MAX(id), 0) + 1 FROM users"
+            ).fetchone()[0]
+            clean_name = "".join(
+                ch for ch in n.upper() if ch.isalnum()
+            )[:12] or "USER"
             new_code = f"{clean_name}{position:03d}"
-            cur = c.execute("""
-                INSERT INTO users(name,email,password,created_at,referral_code,referred_by,role)
+            cur = c.execute(
+                """
+                INSERT INTO users(
+                    name,email,password,created_at,
+                    referral_code,referred_by,role
+                )
                 VALUES(?,?,?,?,?,?,?)
-            """, (n, e, hash_password(p), datetime.now().isoformat(), new_code, referrer["id"] if referrer else None, "user"))
+                """,
+                (
+                    n,
+                    e,
+                    hash_password(p),
+                    datetime.now().isoformat(),
+                    new_code,
+                    referrer["id"] if referrer else None,
+                    "user",
+                ),
+            )
             c.commit()
             session.clear()
             session["uid"] = cur.lastrowid
@@ -364,10 +516,15 @@ def login():
         p = request.form.get("password", "")
         identifier = f"{request.remote_addr or 'unknown'}:{e}"
         if not login_allowed(identifier):
-            flash("Too many login attempts. Please wait a few minutes and try again.")
+            flash(
+                "Too many login attempts. Please wait a few minutes and try again."
+            )
             return redirect(url_for("login"))
         c = db()
-        u = c.execute("SELECT * FROM users WHERE email=?", (e,)).fetchone()
+        u = c.execute(
+            "SELECT * FROM users WHERE email=?",
+            (e,),
+        ).fetchone()
         if not u:
             c.close()
             record_failed_login(identifier)
@@ -380,7 +537,10 @@ def login():
             flash("Invalid email or password.")
             return redirect(url_for("login"))
         if legacy:
-            c.execute("UPDATE users SET password=? WHERE id=?", (hash_password(p), u["id"]))
+            c.execute(
+                "UPDATE users SET password=? WHERE id=?",
+                (hash_password(p), u["id"]),
+            )
             c.commit()
         c.close()
         clear_login_attempts(identifier)
@@ -405,12 +565,35 @@ def logout():
 def dashboard():
     u = current()
     c = db()
-    inv = c.execute("SELECT * FROM investments WHERE user_id=? ORDER BY id DESC", (u["id"],)).fetchall()
-    deps = c.execute("SELECT * FROM deposits WHERE user_id=? ORDER BY id DESC LIMIT 5", (u["id"],)).fetchall()
-    wd = c.execute("SELECT * FROM withdrawals WHERE user_id=? ORDER BY id DESC LIMIT 5", (u["id"],)).fetchall()
-    tx = c.execute("SELECT * FROM transactions WHERE user_id=? ORDER BY id DESC LIMIT 10", (u["id"],)).fetchall()
+    settle_matured_investments(c, u["id"])
+    c.commit()
+    u = c.execute("SELECT * FROM users WHERE id=?", (u["id"],)).fetchone()
+    inv = c.execute(
+        "SELECT * FROM investments WHERE user_id=? ORDER BY id DESC",
+        (u["id"],),
+    ).fetchall()
+    deps = c.execute(
+        "SELECT * FROM deposits WHERE user_id=? ORDER BY id DESC LIMIT 5",
+        (u["id"],),
+    ).fetchall()
+    wd = c.execute(
+        "SELECT * FROM withdrawals WHERE user_id=? ORDER BY id DESC LIMIT 5",
+        (u["id"],),
+    ).fetchall()
+    tx = c.execute(
+        "SELECT * FROM transactions WHERE user_id=? ORDER BY id DESC LIMIT 10",
+        (u["id"],),
+    ).fetchall()
     c.close()
-    return render_template("dashboard.html", user=u, investments=inv, deposits=deps, withdrawals=wd, transactions=tx, plans=PLANS)
+    return render_template(
+        "dashboard.html",
+        user=u,
+        investments=inv,
+        deposits=deps,
+        withdrawals=wd,
+        transactions=tx,
+        plans=PLANS,
+    )
 
 
 @app.route("/invest", methods=["POST"])
@@ -430,13 +613,49 @@ def invest():
     now = datetime.now()
     c = db()
     try:
-        result = c.execute("UPDATE users SET balance=balance-? WHERE id=? AND balance>=?", (amount, u["id"], amount))
+        settle_matured_investments(c, u["id"])
+        result = c.execute(
+            """
+            UPDATE users
+            SET balance=balance-?
+            WHERE id=? AND balance>=?
+            """,
+            (amount, u["id"], amount),
+        )
         if result.rowcount != 1:
             c.rollback()
             flash(f"Insufficient balance. You need ₦{amount:,}.")
             return redirect(url_for("investments"))
-        c.execute("INSERT INTO investments(user_id,plan_id,amount,created_at,maturity_at) VALUES(?,?,?,?,?)", (u["id"], pid, amount, now.isoformat(), (now + timedelta(days=plan[3])).isoformat()))
-        c.execute("INSERT INTO transactions(user_id,kind,amount,note,created_at) VALUES(?,?,?,?,?)", (u["id"], "INVESTMENT", amount, "Investment created", now.isoformat()))
+        c.execute(
+            """
+            INSERT INTO investments(
+                user_id,plan_id,amount,created_at,maturity_at
+            )
+            VALUES(?,?,?,?,?)
+            """,
+            (
+                u["id"],
+                pid,
+                amount,
+                now.isoformat(),
+                (now + timedelta(days=plan[3])).isoformat(),
+            ),
+        )
+        c.execute(
+            """
+            INSERT INTO transactions(
+                user_id,kind,amount,note,created_at
+            )
+            VALUES(?,?,?,?,?)
+            """,
+            (
+                u["id"],
+                "INVESTMENT",
+                amount,
+                "Investment created",
+                now.isoformat(),
+            ),
+        )
         c.commit()
     except Exception:
         c.rollback()
@@ -453,9 +672,19 @@ def invest():
 def investments():
     u = current()
     c = db()
-    items = c.execute("SELECT * FROM investments WHERE user_id=? ORDER BY id DESC", (u["id"],)).fetchall()
+    settle_matured_investments(c, u["id"])
+    c.commit()
+    items = c.execute(
+        "SELECT * FROM investments WHERE user_id=? ORDER BY id DESC",
+        (u["id"],),
+    ).fetchall()
     c.close()
-    return render_template("investments.html", user=u, items=items, plans=PLANS)
+    return render_template(
+        "investments.html",
+        user=u,
+        items=items,
+        plans=PLANS,
+    )
 
 
 @app.route("/deposit", methods=["GET", "POST"])
@@ -463,6 +692,9 @@ def investments():
 def deposit():
     u = current()
     if request.method == "POST":
+        if not PAYMENT_ACCOUNTS:
+            flash("Payment accounts are not configured yet.")
+            return redirect(url_for("deposit"))
         try:
             amount = int(request.form.get("amount", ""))
         except (ValueError, TypeError):
@@ -470,7 +702,10 @@ def deposit():
             return redirect(url_for("deposit"))
         provider = request.form.get("provider", "").strip()
         reference = request.form.get("reference", "").strip()
-        if provider not in {"OPay", "PalmPay", "Moniepoint"}:
+        configured_providers = {
+            account["provider"] for account in PAYMENT_ACCOUNTS
+        }
+        if provider not in ALLOWED_PAYMENT_PROVIDERS or provider not in configured_providers:
             flash("Invalid payment provider.")
             return redirect(url_for("deposit"))
         if not 5000 <= amount <= 30000:
@@ -482,8 +717,48 @@ def deposit():
         now = datetime.now()
         c = db()
         try:
-            c.execute("INSERT INTO deposits(user_id,amount,provider,reference,created_at) VALUES(?,?,?,?,?)", (u["id"], amount, provider, reference, now.isoformat()))
-            c.execute("INSERT INTO transactions(user_id,kind,amount,note,created_at) VALUES(?,?,?,?,?)", (u["id"], "DEPOSIT", amount, "Deposit submitted for review", now.isoformat()))
+            duplicate = c.execute(
+                """
+                SELECT id FROM deposits
+                WHERE provider=? AND reference=?
+                LIMIT 1
+                """,
+                (provider, reference),
+            ).fetchone()
+            if duplicate:
+                c.rollback()
+                flash("That payment reference has already been submitted.")
+                return redirect(url_for("deposit"))
+            c.execute(
+                """
+                INSERT INTO deposits(
+                    user_id,amount,provider,reference,created_at
+                )
+                VALUES(?,?,?,?,?)
+                """,
+                (
+                    u["id"],
+                    amount,
+                    provider,
+                    reference,
+                    now.isoformat(),
+                ),
+            )
+            c.execute(
+                """
+                INSERT INTO transactions(
+                    user_id,kind,amount,note,created_at
+                )
+                VALUES(?,?,?,?,?)
+                """,
+                (
+                    u["id"],
+                    "DEPOSIT",
+                    amount,
+                    "Deposit submitted for review",
+                    now.isoformat(),
+                ),
+            )
             c.commit()
         except Exception:
             c.rollback()
@@ -503,12 +778,23 @@ def deposit_payment():
     if not amount:
         flash("Please select an amount.")
         return redirect(url_for("deposit"))
-    return render_template("deposit_payment.html", amount=amount, accounts=PAYMENT_ACCOUNTS)
+    return render_template(
+        "deposit_payment.html",
+        amount=amount,
+        accounts=PAYMENT_ACCOUNTS,
+    )
 
 
 @app.route("/api/banks", methods=["GET"])
 def api_banks():
-    return jsonify({"status": True, "banks": NIGERIAN_BANKS, "data": NIGERIAN_BANKS, "count": len(NIGERIAN_BANKS)})
+    return jsonify(
+        {
+            "status": True,
+            "banks": NIGERIAN_BANKS,
+            "data": NIGERIAN_BANKS,
+            "count": len(NIGERIAN_BANKS),
+        }
+    )
 
 
 @app.route("/withdraw", methods=["GET", "POST"])
@@ -522,10 +808,17 @@ def withdraw():
             flash("Enter a valid withdrawal amount.")
             return redirect(url_for("withdraw"))
         destination = request.form.get("destination", "").strip()
-        destination_number = request.form.get("destination_number", "").strip()
+        destination_number = request.form.get(
+            "destination_number", ""
+        ).strip()
         account_name = request.form.get("account_name", "").strip()
         bank_code = request.form.get("bank_code", "").strip()
-        allowed_destinations = {"Bank account", "OPay", "PalmPay", "Moniepoint"}
+        allowed_destinations = {
+            "Bank account",
+            "OPay",
+            "PalmPay",
+            "Moniepoint",
+        }
         if not 1500 <= amount <= 800000:
             flash("Withdrawal amount must be between ₦1,500 and ₦800,000.")
             return redirect(url_for("withdraw"))
@@ -553,13 +846,53 @@ def withdraw():
         now = datetime.now()
         c = db()
         try:
-            result = c.execute("UPDATE users SET balance=balance-? WHERE id=? AND balance>=?", (amount, u["id"], amount))
+            settle_matured_investments(c, u["id"])
+            result = c.execute(
+                """
+                UPDATE users
+                SET balance=balance-?
+                WHERE id=? AND balance>=?
+                """,
+                (amount, u["id"], amount),
+            )
             if result.rowcount != 1:
                 c.rollback()
                 flash("Insufficient available balance.")
                 return redirect(url_for("withdraw"))
-            c.execute("INSERT INTO withdrawals(user_id,amount,status,created_at,destination,destination_number,account_name,bank_code) VALUES(?,?,?,?,?,?,?,?)", (u["id"], amount, "pending", now.isoformat(), destination, destination_number, account_name, bank_code))
-            c.execute("INSERT INTO transactions(user_id,kind,amount,note,created_at) VALUES(?,?,?,?,?)", (u["id"], "WITHDRAWAL", -amount, f"Withdrawal request to {destination}", now.isoformat()))
+            c.execute(
+                """
+                INSERT INTO withdrawals(
+                    user_id,amount,status,created_at,
+                    destination,destination_number,account_name,bank_code
+                )
+                VALUES(?,?,?,?,?,?,?,?)
+                """,
+                (
+                    u["id"],
+                    amount,
+                    "pending",
+                    now.isoformat(),
+                    destination,
+                    destination_number,
+                    account_name,
+                    bank_code,
+                ),
+            )
+            c.execute(
+                """
+                INSERT INTO transactions(
+                    user_id,kind,amount,note,created_at
+                )
+                VALUES(?,?,?,?,?)
+                """,
+                (
+                    u["id"],
+                    "WITHDRAWAL",
+                    -amount,
+                    f"Withdrawal request to {destination}",
+                    now.isoformat(),
+                ),
+            )
             c.commit()
         except Exception:
             c.rollback()
@@ -569,7 +902,11 @@ def withdraw():
             c.close()
         flash("Withdrawal request submitted.")
         return redirect(url_for("wallet"))
-    return render_template("withdraw.html", user=u, banks=NIGERIAN_BANKS)
+    return render_template(
+        "withdraw.html",
+        user=u,
+        banks=NIGERIAN_BANKS,
+    )
 
 
 @app.route("/wallet")
@@ -577,10 +914,24 @@ def withdraw():
 def wallet():
     u = current()
     c = db()
-    deps = c.execute("SELECT * FROM deposits WHERE user_id=? ORDER BY id DESC", (u["id"],)).fetchall()
-    wd = c.execute("SELECT * FROM withdrawals WHERE user_id=? ORDER BY id DESC", (u["id"],)).fetchall()
+    settle_matured_investments(c, u["id"])
+    c.commit()
+    u = c.execute("SELECT * FROM users WHERE id=?", (u["id"],)).fetchone()
+    deps = c.execute(
+        "SELECT * FROM deposits WHERE user_id=? ORDER BY id DESC",
+        (u["id"],),
+    ).fetchall()
+    wd = c.execute(
+        "SELECT * FROM withdrawals WHERE user_id=? ORDER BY id DESC",
+        (u["id"],),
+    ).fetchall()
     c.close()
-    return render_template("wallet.html", user=u, deposits=deps, withdrawals=wd)
+    return render_template(
+        "wallet.html",
+        user=u,
+        deposits=deps,
+        withdrawals=wd,
+    )
 
 
 @app.route("/transactions")
@@ -588,7 +939,10 @@ def wallet():
 def transactions():
     u = current()
     c = db()
-    items = c.execute("SELECT * FROM transactions WHERE user_id=? ORDER BY id DESC", (u["id"],)).fetchall()
+    items = c.execute(
+        "SELECT * FROM transactions WHERE user_id=? ORDER BY id DESC",
+        (u["id"],),
+    ).fetchall()
     c.close()
     return render_template("transactions.html", items=items)
 
@@ -603,7 +957,10 @@ def profile():
             flash("Enter a valid name.")
             return redirect(url_for("profile"))
         c = db()
-        c.execute("UPDATE users SET name=? WHERE id=?", (name, u["id"]))
+        c.execute(
+            "UPDATE users SET name=? WHERE id=?",
+            (name, u["id"]),
+        )
         c.commit()
         c.close()
         session["name"] = name
@@ -627,9 +984,22 @@ def support():
 def referral():
     u = current()
     c = db()
-    referrals = c.execute("SELECT name, email, created_at FROM users WHERE referred_by=? ORDER BY id DESC", (u["id"],)).fetchall()
+    referrals = c.execute(
+        """
+        SELECT name, email, created_at
+        FROM users
+        WHERE referred_by=?
+        ORDER BY id DESC
+        """,
+        (u["id"],),
+    ).fetchall()
     c.close()
-    return render_template("referral.html", user=u, referral_code=u["referral_code"], referrals=referrals)
+    return render_template(
+        "referral.html",
+        user=u,
+        referral_code=u["referral_code"],
+        referrals=referrals,
+    )
 
 
 @app.route("/admin")
@@ -637,19 +1007,44 @@ def referral():
 def admin():
     c = db()
     users = c.execute("SELECT * FROM users ORDER BY id DESC").fetchall()
-    deps = c.execute("SELECT d.*, u.name FROM deposits d JOIN users u ON u.id=d.user_id ORDER BY d.id DESC").fetchall()
-    wd = c.execute("SELECT w.*, u.name FROM withdrawals w JOIN users u ON u.id=w.user_id ORDER BY w.id DESC").fetchall()
+    deps = c.execute(
+        """
+        SELECT d.*, u.name
+        FROM deposits d
+        JOIN users u ON u.id=d.user_id
+        ORDER BY d.id DESC
+        """
+    ).fetchall()
+    wd = c.execute(
+        """
+        SELECT w.*, u.name
+        FROM withdrawals w
+        JOIN users u ON u.id=w.user_id
+        ORDER BY w.id DESC
+        """
+    ).fetchall()
     c.close()
-    return render_template("admin.html", users=users, deposits=deps, withdrawals=wd)
+    return render_template(
+        "admin.html",
+        users=users,
+        deposits=deps,
+        withdrawals=wd,
+    )
 
 
 @app.route("/admin/payment-accounts")
 @admin_required
 def payment_accounts():
-    return render_template("payment_accounts.html", accounts=PAYMENT_ACCOUNTS)
+    return render_template(
+        "payment_accounts.html",
+        accounts=PAYMENT_ACCOUNTS,
+    )
 
 
-@app.route("/admin/update-deposit/<int:deposit_id>/<action>", methods=["POST"])
+@app.route(
+    "/admin/update-deposit/<int:deposit_id>/<action>",
+    methods=["POST"],
+)
 @admin_required
 def admin_update_deposit(deposit_id, action):
     if action not in {"approve", "reject"}:
@@ -657,29 +1052,63 @@ def admin_update_deposit(deposit_id, action):
         return redirect(url_for("admin"))
     c = db()
     try:
-        dep = c.execute("SELECT * FROM deposits WHERE id=?", (deposit_id,)).fetchone()
+        dep = c.execute(
+            "SELECT * FROM deposits WHERE id=?",
+            (deposit_id,),
+        ).fetchone()
         if not dep or dep["status"] != "pending":
             c.rollback()
             flash("Deposit is no longer pending.")
             return redirect(url_for("admin"))
         new_status = "approved" if action == "approve" else "rejected"
-
-        # Atomically claim the pending deposit. If another request has
-        # already processed it, no balance or transaction is created.
         result = c.execute(
-            "UPDATE deposits SET status=? WHERE id=? AND status='pending'",
+            """
+            UPDATE deposits
+            SET status=?
+            WHERE id=? AND status='pending'
+            """,
             (new_status, deposit_id),
         )
         if result.rowcount != 1:
             c.rollback()
             flash("Deposit is no longer pending.")
             return redirect(url_for("admin"))
-
         if action == "approve":
-            c.execute("UPDATE users SET balance=balance+? WHERE id=?", (dep["amount"], dep["user_id"]))
-            c.execute("INSERT INTO transactions(user_id,kind,amount,note,created_at) VALUES(?,?,?,?,?)", (dep["user_id"], "DEPOSIT_APPROVED", dep["amount"], "Deposit approved by admin", datetime.now().isoformat()))
+            c.execute(
+                "UPDATE users SET balance=balance+? WHERE id=?",
+                (dep["amount"], dep["user_id"]),
+            )
+            c.execute(
+                """
+                INSERT INTO transactions(
+                    user_id,kind,amount,note,created_at
+                )
+                VALUES(?,?,?,?,?)
+                """,
+                (
+                    dep["user_id"],
+                    "DEPOSIT_APPROVED",
+                    dep["amount"],
+                    "Deposit approved by admin",
+                    datetime.now().isoformat(),
+                ),
+            )
         else:
-            c.execute("INSERT INTO transactions(user_id,kind,amount,note,created_at) VALUES(?,?,?,?,?)", (dep["user_id"], "DEPOSIT_REJECTED", 0, "Deposit rejected by admin", datetime.now().isoformat()))
+            c.execute(
+                """
+                INSERT INTO transactions(
+                    user_id,kind,amount,note,created_at
+                )
+                VALUES(?,?,?,?,?)
+                """,
+                (
+                    dep["user_id"],
+                    "DEPOSIT_REJECTED",
+                    0,
+                    "Deposit rejected by admin",
+                    datetime.now().isoformat(),
+                ),
+            )
         c.commit()
     except Exception:
         c.rollback()
@@ -691,7 +1120,10 @@ def admin_update_deposit(deposit_id, action):
     return redirect(url_for("admin"))
 
 
-@app.route("/admin/update-withdrawal/<int:withdrawal_id>/<action>", methods=["POST"])
+@app.route(
+    "/admin/update-withdrawal/<int:withdrawal_id>/<action>",
+    methods=["POST"],
+)
 @admin_required
 def admin_update_withdrawal(withdrawal_id, action):
     if action not in {"approve", "reject"}:
@@ -699,29 +1131,63 @@ def admin_update_withdrawal(withdrawal_id, action):
         return redirect(url_for("admin"))
     c = db()
     try:
-        wd = c.execute("SELECT * FROM withdrawals WHERE id=?", (withdrawal_id,)).fetchone()
+        wd = c.execute(
+            "SELECT * FROM withdrawals WHERE id=?",
+            (withdrawal_id,),
+        ).fetchone()
         if not wd or wd["status"] != "pending":
             c.rollback()
             flash("Withdrawal is no longer pending.")
             return redirect(url_for("admin"))
         new_status = "approved" if action == "approve" else "rejected"
-
-        # Atomically claim the pending withdrawal before any refund or
-        # transaction is written, preventing double processing.
         result = c.execute(
-            "UPDATE withdrawals SET status=? WHERE id=? AND status='pending'",
+            """
+            UPDATE withdrawals
+            SET status=?
+            WHERE id=? AND status='pending'
+            """,
             (new_status, withdrawal_id),
         )
         if result.rowcount != 1:
             c.rollback()
             flash("Withdrawal is no longer pending.")
             return redirect(url_for("admin"))
-
         if action == "reject":
-            c.execute("UPDATE users SET balance=balance+? WHERE id=?", (wd["amount"], wd["user_id"]))
-            c.execute("INSERT INTO transactions(user_id,kind,amount,note,created_at) VALUES(?,?,?,?,?)", (wd["user_id"], "WITHDRAWAL_REFUNDED", wd["amount"], "Withdrawal rejected and balance refunded", datetime.now().isoformat()))
+            c.execute(
+                "UPDATE users SET balance=balance+? WHERE id=?",
+                (wd["amount"], wd["user_id"]),
+            )
+            c.execute(
+                """
+                INSERT INTO transactions(
+                    user_id,kind,amount,note,created_at
+                )
+                VALUES(?,?,?,?,?)
+                """,
+                (
+                    wd["user_id"],
+                    "WITHDRAWAL_REFUNDED",
+                    wd["amount"],
+                    "Withdrawal rejected and balance refunded",
+                    datetime.now().isoformat(),
+                ),
+            )
         else:
-            c.execute("INSERT INTO transactions(user_id,kind,amount,note,created_at) VALUES(?,?,?,?,?)", (wd["user_id"], "WITHDRAWAL_APPROVED", -wd["amount"], "Withdrawal approved by admin", datetime.now().isoformat()))
+            c.execute(
+                """
+                INSERT INTO transactions(
+                    user_id,kind,amount,note,created_at
+                )
+                VALUES(?,?,?,?,?)
+                """,
+                (
+                    wd["user_id"],
+                    "WITHDRAWAL_APPROVED",
+                    -wd["amount"],
+                    "Withdrawal approved by admin",
+                    datetime.now().isoformat(),
+                ),
+            )
         c.commit()
     except Exception:
         c.rollback()
@@ -735,12 +1201,21 @@ def admin_update_withdrawal(withdrawal_id, action):
 
 @app.errorhandler(400)
 def bad_request(error):
-    return render_template("base.html", error_message=getattr(error, "description", "Bad request.")), 400
+    return (
+        render_template(
+            "base.html",
+            error_message=getattr(error, "description", "Bad request."),
+        ),
+        400,
+    )
 
 
 init_db()
 
 
 if __name__ == "__main__":
-    debug_mode = os.environ.get("NOVA_DEBUG", "0").lower() in {"1", "true", "yes"}
+    debug_mode = (
+        os.environ.get("NOVA_DEBUG", "0").lower()
+        in {"1", "true", "yes"}
+    )
     app.run(debug=debug_mode)
