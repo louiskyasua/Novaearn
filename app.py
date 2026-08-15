@@ -8,6 +8,7 @@ from flask import (
     flash,
     jsonify,
     abort,
+    send_from_directory,
 )
 import sqlite3
 import hashlib
@@ -48,6 +49,10 @@ app.config.update(
 DATA_DIR = os.environ.get("NOVA_DATA_DIR", "instance")
 os.makedirs(DATA_DIR, exist_ok=True)
 DB = os.environ.get("NOVA_DB_PATH", os.path.join(DATA_DIR, "novaearn.db"))
+UPLOAD_DIR = os.environ.get("NOVA_UPLOAD_DIR", os.path.join(DATA_DIR, "deposit_proofs"))
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+MAX_PROOF_SIZE = 5 * 1024 * 1024
+ALLOWED_PROOF_EXTENSIONS = {"jpg", "jpeg", "png", "webp"}
 
 PLANS = [
     (1, "Starter", 5000, 28, 15000),
@@ -218,7 +223,8 @@ def init_db():
             provider TEXT,
             reference TEXT,
             status TEXT DEFAULT 'pending',
-            created_at TEXT
+            created_at TEXT,
+            proof_path TEXT
         );
         CREATE TABLE IF NOT EXISTS withdrawals(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -252,6 +258,13 @@ def init_db():
         c.execute("ALTER TABLE users ADD COLUMN referred_by INTEGER")
     if "role" not in user_columns:
         c.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'")
+
+    deposit_columns = {
+        row[1]
+        for row in c.execute("PRAGMA table_info(deposits)").fetchall()
+    }
+    if "proof_path" not in deposit_columns:
+        c.execute("ALTER TABLE deposits ADD COLUMN proof_path TEXT")
 
     withdrawal_columns = {
         row[1]
@@ -777,15 +790,106 @@ def deposit():
 @app.route("/deposit/payment", methods=["POST"])
 @login_required
 def deposit_payment():
-    amount = request.form.get("amount")
-    if not amount:
-        flash("Please select an amount.")
+    try:
+        amount = int(request.form.get("amount", ""))
+    except (ValueError, TypeError):
+        flash("Enter a valid deposit amount.")
+        return redirect(url_for("deposit"))
+    if not 5000 <= amount <= 30000:
+        flash("Deposit amount must be between ₦5,000 and ₦30,000.")
         return redirect(url_for("deposit"))
     return render_template(
         "deposit_payment.html",
         amount=amount,
         accounts=PAYMENT_ACCOUNTS,
     )
+
+
+@app.route("/deposit/submit-proof", methods=["POST"])
+@login_required
+def deposit_submit_proof():
+    u = current()
+    try:
+        amount = int(request.form.get("amount", ""))
+    except (ValueError, TypeError):
+        flash("Enter a valid deposit amount.")
+        return redirect(url_for("deposit"))
+
+    provider = request.form.get("provider", "").strip()
+    reference = request.form.get("reference", "").strip()
+    proof = request.files.get("proof")
+    configured_providers = {account["provider"] for account in PAYMENT_ACCOUNTS}
+
+    if not 5000 <= amount <= 30000:
+        flash("Deposit amount must be between ₦5,000 and ₦30,000.")
+        return redirect(url_for("deposit"))
+    if provider not in ALLOWED_PAYMENT_PROVIDERS or provider not in configured_providers:
+        flash("Invalid payment provider.")
+        return redirect(url_for("deposit"))
+    if not reference or len(reference) > 150:
+        flash("Enter a valid payment reference.")
+        return redirect(url_for("deposit"))
+    if not proof or not proof.filename:
+        flash("Please upload your proof of payment.")
+        return redirect(url_for("deposit"))
+
+    extension = proof.filename.rsplit(".", 1)[-1].lower() if "." in proof.filename else ""
+    if extension not in ALLOWED_PROOF_EXTENSIONS:
+        flash("Proof must be a JPG, PNG, or WebP image.")
+        return redirect(url_for("deposit"))
+
+    proof.stream.seek(0, 2)
+    size = proof.stream.tell()
+    proof.stream.seek(0)
+    if size > MAX_PROOF_SIZE:
+        flash("Proof image must be 5 MB or smaller.")
+        return redirect(url_for("deposit"))
+
+    now = datetime.now()
+    c = db()
+    saved_path = None
+    try:
+        duplicate = c.execute(
+            "SELECT id FROM deposits WHERE provider=? AND reference=? LIMIT 1",
+            (provider, reference),
+        ).fetchone()
+        if duplicate:
+            flash("That payment reference has already been submitted.")
+            return redirect(url_for("deposit"))
+
+        filename = f"deposit_{u['id']}_{secrets.token_urlsafe(18)}.{extension}"
+        saved_path = os.path.join(UPLOAD_DIR, filename)
+        proof.save(saved_path)
+
+        c.execute(
+            """
+            INSERT INTO deposits(user_id,amount,provider,reference,status,created_at,proof_path)
+            VALUES(?,?,?,?,?,?,?)
+            """,
+            (u["id"], amount, provider, reference, "pending", now.isoformat(), filename),
+        )
+        c.execute(
+            """
+            INSERT INTO transactions(user_id,kind,amount,note,created_at)
+            VALUES(?,?,?,?,?)
+            """,
+            (u["id"], "DEPOSIT", amount, "Deposit submitted with proof for review", now.isoformat()),
+        )
+        c.commit()
+    except Exception:
+        c.rollback()
+        if saved_path:
+            try:
+                os.remove(saved_path)
+            except OSError:
+                pass
+        flash("Unable to submit deposit proof.")
+        return redirect(url_for("deposit"))
+    finally:
+        c.close()
+
+    flash("Deposit proof submitted. Your deposit is pending admin verification.")
+    return redirect(url_for("wallet"))
 
 
 @app.route("/api/banks", methods=["GET"])
@@ -1041,6 +1145,18 @@ def admin():
         deposits=deps,
         withdrawals=wd,
     )
+
+
+@app.route("/admin/deposit-proof/<int:deposit_id>")
+@admin_required
+def admin_deposit_proof(deposit_id):
+    c = db()
+    dep = c.execute("SELECT proof_path FROM deposits WHERE id=?", (deposit_id,)).fetchone()
+    c.close()
+    if not dep or not dep["proof_path"]:
+        abort(404)
+    filename = os.path.basename(dep["proof_path"])
+    return send_from_directory(UPLOAD_DIR, filename, as_attachment=False)
 
 
 @app.route("/admin/payment-accounts")
