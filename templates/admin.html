@@ -21,14 +21,16 @@
 <section>
   <div class="sectionhead"><h2>Deposits</h2></div>
   <div class="table"><table>
-    <tr><th>User</th><th>Amount</th><th>Provider</th><th>Reference</th><th>Date</th><th>Status</th><th>Action</th></tr>
+    <tr><th>User</th><th>Amount</th><th>Provider</th><th>Reference</th><th>Proof</th><th>Date</th><th>Status</th><th>Action</th></tr>
     {% for d in deposits %}<tr>
-      <td>{{ d.name }}</td><td>₦{{ "{:,}".format(d.amount) }}</td><td>{{ d.provider }}</td><td>{{ d.reference }}</td><td>{{ d.created_at[:16] if d.created_at else "—" }}</td><td><span class="status">{{ d.status }}</span></td>
+      <td>{{ d.name }}</td><td>₦{{ "{:,}".format(d.amount) }}</td><td>{{ d.provider }}</td><td>{{ d.reference }}</td>
+      <td>{% if d.proof_path %}<a class="btn" href="{{ url_for('admin_deposit_proof', deposit_id=d.id) }}" target="_blank" rel="noopener">View proof</a>{% else %}—{% endif %}</td>
+      <td>{{ d.created_at[:16] if d.created_at else "—" }}</td><td><span class="status">{{ d.status }}</span></td>
       <td>{% if d.status == 'pending' %}
         <form method="post" action="/admin/update-deposit/{{ d.id }}/approve" style="display:inline"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="btn" type="submit">Approve</button></form>
         <form method="post" action="/admin/update-deposit/{{ d.id }}/reject" style="display:inline"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="btn" type="submit">Reject</button></form>
       {% else %}—{% endif %}</td>
-    </tr>{% else %}<tr><td colspan="7">No deposits yet.</td></tr>{% endfor %}
+    </tr>{% else %}<tr><td colspan="8">No deposits yet.</td></tr>{% endfor %}
   </table></div>
 </section>
 <section>
