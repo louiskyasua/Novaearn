@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <p class="eyebrow">ACCOUNT ACTIVATION</p>
+  <h1>Activate Your Account</h1>
+  <p class="muted">Activate your account to unlock Investments, Referrals, and Withdrawals.</p>
+  <div class="card">
+    <h3>Activation</h3>
+    <p>Follow the activation instructions provided by NovaEarn and submit your activation request for review.</p>
+    <p class="muted">Your account remains available for ordinary dashboard and deposit access while activation is pending.</p>
+  </div>
+  <a class="btn" href="{{ url_for('dashboard') }}">Back to Dashboard</a>
+</div>
+{% endblock %}
