@@ -1,0 +1,72 @@
+name: Add deposit proof verification
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Patch backend
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('app.py')
+          s = p.read_text(encoding='utf-8')
+
+          s = s.replace(
+              '    abort,\n)',
+              '    abort,\n    send_from_directory,\n)',
+              1,
+          )
+
+          s = s.replace(
+              'DB = os.environ.get("NOVA_DB_PATH", os.path.join(DATA_DIR, "novaearn.db"))\n',
+              'DB = os.environ.get("NOVA_DB_PATH", os.path.join(DATA_DIR, "novaearn.db"))\nUPLOAD_DIR = os.environ.get("NOVA_UPLOAD_DIR", os.path.join(DATA_DIR, "deposit_proofs"))\nos.makedirs(UPLOAD_DIR, exist_ok=True)\nMAX_PROOF_SIZE = 5 * 1024 * 1024\nALLOWED_PROOF_EXTENSIONS = {"jpg", "jpeg", "png", "webp"}\n',
+              1,
+          )
+
+          s = s.replace(
+              '            reference TEXT,\n            status TEXT DEFAULT \'pending\',\n            created_at TEXT\n',
+              '            reference TEXT,\n            status TEXT DEFAULT \'pending\',\n            created_at TEXT,\n            proof_path TEXT\n',
+              1,
+          )
+
+          marker = '    withdrawal_columns = {\n'
+          insert = '''    deposit_columns = {\n        row[1]\n        for row in c.execute("PRAGMA table_info(deposits)").fetchall()\n    }\n    if "proof_path" not in deposit_columns:\n        c.execute("ALTER TABLE deposits ADD COLUMN proof_path TEXT")\n\n'''
+          if marker not in s:
+              raise SystemExit('deposit schema marker not found')
+          s = s.replace(marker, insert + marker, 1)
+
+          old = '''@app.route("/deposit/payment", methods=["POST"])\n@login_required\ndef deposit_payment():\n    amount = request.form.get("amount")\n    if not amount:\n        flash("Please select an amount.")\n        return redirect(url_for("deposit"))\n    return render_template(\n        "deposit_payment.html",\n        amount=amount,\n        accounts=PAYMENT_ACCOUNTS,\n    )\n\n\n'''
+          new = '''@app.route("/deposit/payment", methods=["POST"])\n@login_required\ndef deposit_payment():\n    try:\n        amount = int(request.form.get("amount", ""))\n    except (ValueError, TypeError):\n        flash("Enter a valid deposit amount.")\n        return redirect(url_for("deposit"))\n    if not 5000 <= amount <= 30000:\n        flash("Deposit amount must be between ₦5,000 and ₦30,000.")\n        return redirect(url_for("deposit"))\n    return render_template(\n        "deposit_payment.html",\n        amount=amount,\n        accounts=PAYMENT_ACCOUNTS,\n    )\n\n\n@app.route("/deposit/submit-proof", methods=["POST"])\n@login_required\ndef deposit_submit_proof():\n    u = current()\n    try:\n        amount = int(request.form.get("amount", ""))\n    except (ValueError, TypeError):\n        flash("Enter a valid deposit amount.")\n        return redirect(url_for("deposit"))\n\n    provider = request.form.get("provider", "").strip()\n    reference = request.form.get("reference", "").strip()\n    proof = request.files.get("proof")\n    configured_providers = {account["provider"] for account in PAYMENT_ACCOUNTS}\n\n    if not 5000 <= amount <= 30000:\n        flash("Deposit amount must be between ₦5,000 and ₦30,000.")\n        return redirect(url_for("deposit"))\n    if provider not in ALLOWED_PAYMENT_PROVIDERS or provider not in configured_providers:\n        flash("Invalid payment provider.")\n        return redirect(url_for("deposit"))\n    if not reference or len(reference) > 150:\n        flash("Enter a valid payment reference.")\n        return redirect(url_for("deposit"))\n    if not proof or not proof.filename:\n        flash("Please upload your proof of payment.")\n        return redirect(url_for("deposit"))\n\n    extension = proof.filename.rsplit(".", 1)[-1].lower() if "." in proof.filename else ""\n    if extension not in ALLOWED_PROOF_EXTENSIONS:\n        flash("Proof must be a JPG, PNG, or WebP image.")\n        return redirect(url_for("deposit"))\n\n    proof.stream.seek(0, 2)\n    size = proof.stream.tell()\n    proof.stream.seek(0)\n    if size > MAX_PROOF_SIZE:\n        flash("Proof image must be 5 MB or smaller.")\n        return redirect(url_for("deposit"))\n\n    now = datetime.now()\n    c = db()\n    saved_path = None\n    try:\n        duplicate = c.execute(\n            "SELECT id FROM deposits WHERE provider=? AND reference=? LIMIT 1",\n            (provider, reference),\n        ).fetchone()\n        if duplicate:\n            flash("That payment reference has already been submitted.")\n            return redirect(url_for("deposit"))\n\n        filename = f"deposit_{u['id']}_{secrets.token_urlsafe(18)}.{extension}"\n        saved_path = os.path.join(UPLOAD_DIR, filename)\n        proof.save(saved_path)\n\n        c.execute(\n            """\n            INSERT INTO deposits(user_id,amount,provider,reference,status,created_at,proof_path)\n            VALUES(?,?,?,?,?,?,?)\n            """,\n            (u["id"], amount, provider, reference, "pending", now.isoformat(), filename),\n        )\n        c.execute(\n            """\n            INSERT INTO transactions(user_id,kind,amount,note,created_at)\n            VALUES(?,?,?,?,?)\n            """,\n            (u["id"], "DEPOSIT", amount, "Deposit submitted with proof for review", now.isoformat()),\n        )\n        c.commit()\n    except Exception:\n        c.rollback()\n        if saved_path:\n            try:\n                os.remove(saved_path)\n            except OSError:\n                pass\n        flash("Unable to submit deposit proof.")\n        return redirect(url_for("deposit"))\n    finally:\n        c.close()\n\n    flash("Deposit proof submitted. Your deposit is pending admin verification.")\n    return redirect(url_for("wallet"))\n\n\n'''
+          if old not in s:
+              raise SystemExit('deposit payment route not found')
+          s = s.replace(old, new, 1)
+
+          marker = '@app.route("/admin/payment-accounts")\n'
+          route = '''@app.route("/admin/deposit-proof/<int:deposit_id>")\n@admin_required\ndef admin_deposit_proof(deposit_id):\n    c = db()\n    dep = c.execute("SELECT proof_path FROM deposits WHERE id=?", (deposit_id,)).fetchone()\n    c.close()\n    if not dep or not dep["proof_path"]:\n        abort(404)\n    filename = os.path.basename(dep["proof_path"])\n    return send_from_directory(UPLOAD_DIR, filename, as_attachment=False)\n\n\n'''
+          if marker not in s:
+              raise SystemExit('admin payment marker not found')
+          s = s.replace(marker, route + marker, 1)
+
+          p.write_text(s, encoding='utf-8')
+          PY
+
+      - name: Verify backend
+        run: python -m py_compile app.py
+
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.py
+          git commit -m "Add secure deposit proof verification workflow" || exit 0
+          git push
