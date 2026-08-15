@@ -29,14 +29,11 @@
       {% endfor %}
     </select>
 
-    <label for="bank_code">Bank code</label>
-    <input id="bank_code" name="bank_code" type="text" inputmode="numeric" maxlength="6" required>
-
     <label for="destination_number">Account number</label>
-    <input id="destination_number" name="destination_number" type="text" inputmode="numeric" maxlength="20" required>
+    <input id="destination_number" name="destination_number" type="text" inputmode="numeric" maxlength="10" minlength="10" required>
 
     <label for="account_name">Account name</label>
-    <input id="account_name" name="account_name" type="text" maxlength="100" required>
+    <input id="account_name" name="account_name" type="text" maxlength="120" required>
 
     <button class="btn" type="submit">Request withdrawal</button>
   </form>
