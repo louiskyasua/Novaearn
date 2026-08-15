@@ -815,7 +815,15 @@ def withdraw():
             "destination_number", ""
         ).strip()
         account_name = request.form.get("account_name", "").strip()
-        bank_code = request.form.get("bank_code", "").strip()
+
+        # The selected bank determines the bank code. Users must not enter
+        # or submit a bank code manually. This prevents false "Please select
+        # a valid bank" errors when the bank dropdown is valid.
+        selected_bank = next(
+            (bank for bank in NIGERIAN_BANKS if bank["name"] == destination),
+            None,
+        )
+        bank_code = selected_bank["code"] if selected_bank else ""
         allowed_destinations = {
             "Bank account",
             "OPay",
@@ -832,7 +840,7 @@ def withdraw():
             flash("Account number must contain digits only.")
             return redirect(url_for("withdraw"))
         if destination == "Bank account" or destination in BANK_DESTINATIONS:
-            if bank_code not in BANK_CODES:
+            if selected_bank is None:
                 flash("Please select a valid bank.")
                 return redirect(url_for("withdraw"))
             if len(destination_number) != 10:
