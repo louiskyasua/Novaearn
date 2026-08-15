@@ -18,7 +18,8 @@
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
 
     <label for="amount">Amount</label>
-    <input id="amount" name="amount" type="number" min="5000" step="1" max="{{ user.balance }}" required>
+    <input id="amount" name="amount" type="number" min="1500" step="1" max="800000" required>
+    <p class="muted">Minimum withdrawal: ₦1,500. Maximum withdrawal: ₦800,000.</p>
 
     <label for="destination">Bank</label>
     <select id="destination" name="destination" required>
