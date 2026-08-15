@@ -1,21 +1,9 @@
 {% extends "base.html" %}
 {% block content %}
-{% if locked %}
 <div class="card">
   <p class="eyebrow">REFERRALS</p>
-  <h1>Activate Account to Start Referring</h1>
-  <p class="muted">Referral tools are locked until your account has been activated.</p>
+  <h1>Referral Access Locked</h1>
+  <p class="muted">Activate your account to use referral features.</p>
   <a class="btn" href="{{ url_for('activate') }}">Activate Account</a>
 </div>
-{% else %}
-
-<div class="card">
-  <p class="eyebrow">REFERRALS</p>
-  <h1>Activate Account to Start Referring</h1>
-  <p class="muted">Your referral tools are locked until your NovaEarn account has been activated.</p>
-  <a class="btn" href="{{ url_for('activate') }}">Activate Account</a>
-</div>
-{% endblock %}
-
-{% endif %}
 {% endblock %}
