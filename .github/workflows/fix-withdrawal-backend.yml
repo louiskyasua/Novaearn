@@ -1,0 +1,57 @@
+name: Fix withdrawal bank validation
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix-withdrawal:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Patch withdrawal backend
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("app.py")
+          text = path.read_text(encoding="utf-8")
+
+          old = '''        account_name = request.form.get("account_name", "").strip()\n        bank_code = request.form.get("bank_code", "").strip()\n'''
+          new = '''        account_name = request.form.get("account_name", "").strip()\n\n        # The selected bank determines the bank code. Users must not enter\n        # or submit a bank code manually. This prevents false "Please select\n        # a valid bank" errors when the bank dropdown is valid.\n        selected_bank = next(\n            (bank for bank in NIGERIAN_BANKS if bank["name"] == destination),\n            None,\n        )\n        bank_code = selected_bank["code"] if selected_bank else ""\n'''
+          if old not in text:
+              raise SystemExit("Expected withdrawal bank-code block was not found")
+          text = text.replace(old, new, 1)
+
+          old_validation = '''        if destination == "Bank account" or destination in BANK_DESTINATIONS:\n            if bank_code not in BANK_CODES:\n                flash("Please select a valid bank.")\n                return redirect(url_for("withdraw"))\n            if len(destination_number) != 10:\n'''
+          new_validation = '''        if destination == "Bank account" or destination in BANK_DESTINATIONS:\n            if selected_bank is None:\n                flash("Please select a valid bank.")\n                return redirect(url_for("withdraw"))\n            if len(destination_number) != 10:\n'''
+          if old_validation not in text:
+              raise SystemExit("Expected withdrawal bank validation block was not found")
+          text = text.replace(old_validation, new_validation, 1)
+
+          path.write_text(text, encoding="utf-8")
+          PY
+
+      - name: Verify withdrawal backend
+        run: |
+          python -m py_compile app.py
+          grep -q 'selected_bank = next' app.py
+          ! grep -q 'bank_code = request.form.get("bank_code"' app.py
+
+      - name: Commit backend fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.py
+          if git diff --cached --quiet; then
+            echo "No backend changes needed"
+          else
+            git commit -m "Fix withdrawal bank validation backend"
+            git push
+          fi
