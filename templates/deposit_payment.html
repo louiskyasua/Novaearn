@@ -1,43 +1,46 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="card">
-  <p class="eyebrow">PAYMENT</p>
-  <h1>Payment instructions</h1>
-  <p>Deposit amount: <strong>₦{{ "{:,}".format(amount|int) }}</strong></p>
-  <p class="muted">Use the payment details shown below and transfer the exact amount. Do not submit your proof until the transfer has been completed.</p>
+<div style="min-height:100vh;background:#eaf8ef;padding:24px 0;margin:-24px 0;">
+  <div class="card" style="max-width:720px;margin:0 auto;">
+    <p class="eyebrow">PAYMENT</p>
+    <h1>Payment instructions</h1>
+    <p>Deposit amount: <strong>₦{{ "{:,}".format(amount|int) }}</strong></p>
+    <p class="muted">Use the payment details shown below and transfer the exact amount. Do not submit your proof until the transfer has been completed.</p>
 
-  {% for account in accounts %}
-  <div class="row">
-    <span><strong>{{ account.provider }}</strong><br><small>Account number: {{ account.account_number }}</small></span>
+    {% for account in accounts %}
+    <div class="card" style="background:#f5fff8;border:1px solid #b7e4c7;">
+      <strong>{{ account.provider }}</strong><br>
+      <span>Account number: {{ account.account_number }}</span>
+    </div>
+    {% else %}
+    <p class="muted">Payment instructions are temporarily unavailable.</p>
+    {% endfor %}
+
+    <hr>
+    <h2>I've transferred the money</h2>
+    <p class="muted">Upload a clear screenshot or image showing the completed transfer. Your deposit will remain pending until an administrator verifies it.</p>
+
+    <form method="post" action="{{ url_for('deposit_submit_proof') }}" enctype="multipart/form-data">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="amount" value="{{ amount }}">
+
+      <label for="provider">Payment provider used</label>
+      <select id="provider" name="provider" required>
+        <option value="">Select provider</option>
+        {% for account in accounts %}
+        <option value="{{ account.provider }}">{{ account.provider }}</option>
+        {% endfor %}
+      </select>
+
+      <label for="reference">Payment reference</label>
+      <input id="reference" name="reference" type="text" maxlength="150" required placeholder="Enter the transfer reference">
+
+      <label for="proof">Proof of payment</label>
+      <input id="proof" name="proof" type="file" accept="image/jpeg,image/png,image/webp" required>
+      <small>Accepted: JPG, PNG or WebP. Maximum 5 MB.</small>
+
+      <button class="btn" type="submit">I've transferred the money</button>
+    </form>
   </div>
-  {% else %}
-  <p class="muted">Payment instructions are temporarily unavailable.</p>
-  {% endfor %}
-
-  <hr>
-  <h2>I've transferred the money</h2>
-  <p class="muted">Upload a clear screenshot or image showing the completed transfer. Your deposit will remain pending until an administrator verifies it.</p>
-
-  <form method="post" action="{{ url_for('deposit_submit_proof') }}" enctype="multipart/form-data">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <input type="hidden" name="amount" value="{{ amount }}">
-
-    <label for="provider">Payment provider used</label>
-    <select id="provider" name="provider" required>
-      <option value="">Select provider</option>
-      {% for account in accounts %}
-      <option value="{{ account.provider }}">{{ account.provider }}</option>
-      {% endfor %}
-    </select>
-
-    <label for="reference">Payment reference</label>
-    <input id="reference" name="reference" type="text" maxlength="150" required placeholder="Enter the transfer reference">
-
-    <label for="proof">Proof of payment</label>
-    <input id="proof" name="proof" type="file" accept="image/jpeg,image/png,image/webp" required>
-    <small>Accepted: JPG, PNG or WebP. Maximum 5 MB.</small>
-
-    <button class="btn" type="submit">I've transferred the money</button>
-  </form>
 </div>
 {% endblock %}
