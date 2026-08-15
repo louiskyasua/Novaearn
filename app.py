@@ -205,7 +205,8 @@ def init_db():
             created_at TEXT,
             referral_code TEXT UNIQUE,
             referred_by INTEGER,
-            role TEXT DEFAULT 'user'
+            role TEXT DEFAULT 'user',
+            activated INTEGER DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS investments(
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -258,6 +259,8 @@ def init_db():
         c.execute("ALTER TABLE users ADD COLUMN referred_by INTEGER")
     if "role" not in user_columns:
         c.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'")
+    if "activated" not in user_columns:
+        c.execute("ALTER TABLE users ADD COLUMN activated INTEGER DEFAULT 0")
 
     deposit_columns = {
         row[1]
@@ -616,6 +619,9 @@ def dashboard():
 @login_required
 def invest():
     u = current()
+    if not u["activated"]:
+        flash("Activate your account to start investing.")
+        return redirect(url_for("activate"))
     try:
         pid = int(request.form.get("plan_id", ""))
     except (ValueError, TypeError):
@@ -687,6 +693,8 @@ def invest():
 @login_required
 def investments():
     u = current()
+    if not u["activated"]:
+        return render_template("investments.html", user=u, items=[], plans=PLANS, locked=True)
     c = db()
     settle_matured_investments(c, u["id"])
     c.commit()
@@ -908,6 +916,9 @@ def api_banks():
 @login_required
 def withdraw():
     u = current()
+    if not u["activated"]:
+        flash("Activate your account to withdraw.")
+        return redirect(url_for("activate"))
     if request.method == "POST":
         try:
             amount = int(request.form.get("amount", ""))
@@ -1084,6 +1095,16 @@ def profile():
     return render_template("profile.html", user=u)
 
 
+@app.route("/activate")
+@login_required
+def activate():
+    u = current()
+    if u["activated"]:
+        flash("Your account is already activated.")
+        return redirect(url_for("dashboard"))
+    return render_template("activate.html", user=u)
+
+
 @app.route("/about")
 def about():
     return render_template("about.html")
@@ -1098,6 +1119,8 @@ def support():
 @login_required
 def referral():
     u = current()
+    if not u["activated"]:
+        return render_template("referral.html", user=u, referral_code=u["referral_code"], referrals=[], locked=True)
     c = db()
     referrals = c.execute(
         """
