@@ -1,6 +1,14 @@
 {% extends "base.html" %}
-
 {% block content %}
+{% if locked %}
+<div class="card">
+  <p class="eyebrow">WITHDRAWALS</p>
+  <h1>Activate Account to Withdraw</h1>
+  <p class="muted">Withdrawal access is locked until your account has been activated.</p>
+  <a class="btn" href="{{ url_for('activate') }}">Activate Account</a>
+</div>
+{% else %}
+
 <div class="pagehead">
   <div>
     <p class="eyebrow">WALLET</p>
@@ -42,4 +50,7 @@
 <div class="card">
   <p class="muted"><strong>Security:</strong> Your balance is not increased by a withdrawal request. A pending request must be reviewed through the admin system before payment is made.</p>
 </div>
+{% endblock %}
+
+{% endif %}
 {% endblock %}

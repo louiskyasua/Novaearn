@@ -917,6 +917,8 @@ def api_banks():
 def withdraw():
     u = current()
     if not u["activated"]:
+        return render_template("withdraw.html", user=u, banks=[], locked=True)
+    if not u["activated"]:
         flash("Activate your account to withdraw.")
         return redirect(url_for("activate"))
     if request.method == "POST":
