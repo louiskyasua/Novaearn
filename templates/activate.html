@@ -15,9 +15,15 @@
     p{line-height:1.65}.muted{color:var(--muted)}
     .note{margin-top:20px;padding:16px;border:1px solid #b7dfcc;background:#effbf5;border-radius:15px}
     .note strong{font-weight:900}
-    .status{margin:20px 0;padding:16px;border-radius:15px;background:linear-gradient(135deg,var(--green),var(--green2));color:white;font-weight:800}
+    .status{margin:20px 0;padding:16px;border-radius:15px;background:linear-gradient(135deg,var(--green),var(--green2));color:white;font-weight:800;display:flex;align-items:center;gap:12px}
+    .spinner{width:20px;height:20px;border:3px solid rgba(255,255,255,.35);border-top-color:#fff;border-radius:50%;animation:spin .9s linear infinite;flex:none}
+    .details{display:none;margin-top:20px}
+    .account{padding:18px;border:1px solid var(--line);border-radius:16px;background:#f7fffb}
+    .account .label{font-size:.78rem;text-transform:uppercase;letter-spacing:.12em;font-weight:900;color:var(--green);margin-bottom:7px}
+    .account .number{font-size:1.8rem;font-weight:900;letter-spacing:.04em}
     .btn{display:inline-flex;align-items:center;justify-content:center;margin-top:18px;padding:13px 18px;border-radius:12px;background:var(--green);color:white;text-decoration:none;font-weight:850}
     .small{font-size:.9rem}
+    @keyframes spin{to{transform:rotate(360deg)}}
   </style>
 </head>
 <body>
@@ -25,18 +31,33 @@
     <section class="card">
       <p class="eyebrow">ACCOUNT ACTIVATION</p>
       <h1>Activate Your Account</h1>
-      <p class="muted">This page is opened separately from the locked section so you can keep your Nova Earn dashboard open in the original tab.</p>
 
-      <div class="status">GENERATING ACCOUNT TO TRANSFER</div>
-
-      <div class="note">
-        <strong>NOTE: Accounts used for payments are virtual accounts that have been dormant.</strong>
+      <div class="status" id="status">
+        <span class="spinner" aria-hidden="true"></span>
+        <span>GENERATING ACCOUNT TO TRANSFER</span>
       </div>
 
-      <p class="small muted">For safety, payment destinations should be verified from your official configured payment provider before any transfer is made.</p>
+      <div class="details" id="details">
+        <div class="note">
+          <strong>NOTE: Accounts used for payments are virtual accounts that have been dormant.</strong>
+        </div>
+
+        <div class="account">
+          <div class="label">Payment account</div>
+          <div class="number">Payment details will appear here</div>
+          <p class="small muted">Use only payment details that have been verified through Nova Earn's official payment configuration.</p>
+        </div>
+      </div>
 
       <a class="btn" href="{{ url_for('dashboard') }}">Return to Dashboard</a>
     </section>
   </main>
+
+  <script>
+    setTimeout(function () {
+      document.getElementById('status').style.display = 'none';
+      document.getElementById('details').style.display = 'block';
+    }, 2200);
+  </script>
 </body>
 </html>
