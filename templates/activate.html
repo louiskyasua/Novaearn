@@ -13,6 +13,9 @@
     .eyebrow{margin:0 0 10px;color:var(--green);font-size:.78rem;font-weight:900;letter-spacing:.15em;text-transform:uppercase}
     h1{margin:0 0 12px;font-size:clamp(2rem,7vw,3.2rem);line-height:1.05;letter-spacing:-.04em}
     p{line-height:1.65}.muted{color:var(--muted)}
+    .fee{margin:18px 0;padding:18px;border:2px solid #b8e3cd;border-radius:16px;background:#effff6;display:flex;justify-content:space-between;align-items:center;gap:16px}
+    .fee-label{font-weight:800;color:var(--muted)}
+    .fee-amount{font-size:1.7rem;font-weight:950;color:var(--green)}
     .status{margin:20px 0 8px;padding:16px;border-radius:15px;background:linear-gradient(135deg,var(--green),var(--green2));color:white;font-weight:800;display:flex;align-items:center;gap:12px}
     .spinner{width:20px;height:20px;border:3px solid rgba(255,255,255,.35);border-top-color:#fff;border-radius:50%;animation:spin .9s linear infinite;flex:none}
     .tiny-note{font-size:.72rem;color:var(--muted);margin:0 0 18px}
@@ -37,6 +40,12 @@
       <p class="eyebrow">ACCOUNT ACTIVATION</p>
       <h1>Activate Your Account</h1>
 
+      <div class="fee">
+        <span class="fee-label">Account Activation Fee</span>
+        <span class="fee-amount">₦1,000</span>
+      </div>
+      <p class="muted small">A one-time ₦1,000 activation fee is required to activate your Nova Earn account. This fee is separate from any investment or rewards balance.</p>
+
       <div class="status" id="generating">
         <span class="spinner" aria-hidden="true"></span>
         <span>GENERATING VIRTUAL ACCOUNT</span>
@@ -51,7 +60,7 @@
             <div class="number" id="accountNumber">7060777834</div>
             <button class="copy-btn" type="button" id="copyAccount">Copy</button>
           </div>
-          <p class="tiny-note">This payment destination can be linked to your Nova Earn account for future transactions.</p>
+          <p class="tiny-note">Pay the displayed activation fee of ₦1,000 using the payment details provided. Keep your payment receipt for your records.</p>
           <div class="timer-box">
             <span>ACCOUNT READY</span>
             <span class="timer" id="timer">2:00</span>
