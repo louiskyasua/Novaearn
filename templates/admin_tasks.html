@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="pagehead">
+  <div>
+    <p class="eyebrow">ADMIN</p>
+    <h1>Task Reviews</h1>
+    <p class="muted">AI-assisted screenshot checks are advisory. Approve or reject each reward manually.</p>
+  </div>
+  <a class="btn" href="{{ url_for('admin') }}">Admin Dashboard</a>
+</div>
+
+<div class="table"><table>
+  <tr><th>User</th><th>Task</th><th>Reward</th><th>AI result</th><th>Confidence</th><th>AI reason</th><th>Proof</th><th>Status</th><th>Action</th></tr>
+  {% for s in submissions %}
+  <tr>
+    <td>{{ s.name }}<br><small>{{ s.email }}</small></td>
+    <td>{{ tasks[s.task_key].title if s.task_key in tasks else s.task_key }}</td>
+    <td>₦{{ "{:,}".format(s.reward) }}</td>
+    <td>{{ s.ai_status|replace('_',' ')|title }}</td>
+    <td>{{ (s.ai_confidence * 100)|round(0) }}%</td>
+    <td style="white-space:normal;min-width:260px">{{ s.ai_reason or '—' }}</td>
+    <td><a class="btn" href="{{ url_for('admin_task_proof', submission_id=s.id) }}" target="_blank" rel="noopener">View proof</a></td>
+    <td><span class="status">{{ s.status }}</span></td>
+    <td>{% if s.status == 'pending' %}
+      <form method="post" action="{{ url_for('admin_update_task', submission_id=s.id, action='approve') }}" style="display:inline"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="btn" type="submit">Approve</button></form>
+      <form method="post" action="{{ url_for('admin_update_task', submission_id=s.id, action='reject') }}" style="display:inline"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="btn" type="submit">Reject</button></form>
+    {% else %}—{% endif %}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="9">No task submissions yet.</td></tr>
+  {% endfor %}
+</table></div>
+{% endblock %}
