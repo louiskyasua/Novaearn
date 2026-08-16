@@ -1,4 +1,4 @@
-name: Add account activation locks
+name: Maintain account activation locks
 
 on:
   push:
@@ -15,83 +15,51 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Patch backend activation controls
+      - name: Ensure activation backend controls
         run: |
           python - <<'PY'
           from pathlib import Path
           path = Path("app.py")
           text = path.read_text(encoding="utf-8")
 
-          old = '''            role TEXT DEFAULT 'user'\n        );'''
-          new = '''            role TEXT DEFAULT 'user',\n            activated INTEGER DEFAULT 0\n        );'''
-          if old in text:
+          if "activated INTEGER DEFAULT 0" not in text:
+              old = '''            role TEXT DEFAULT 'user'\n        );'''
+              new = '''            role TEXT DEFAULT 'user',\n            activated INTEGER DEFAULT 0\n        );'''
+              if old not in text:
+                  raise SystemExit("Could not add activated column")
               text = text.replace(old, new, 1)
-          elif "activated INTEGER DEFAULT 0" not in text:
-              raise SystemExit("Could not add activated column")
 
-          marker = '''    if "role" not in user_columns:\n        c.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'")\n'''
-          addition = marker + '''    if "activated" not in user_columns:\n        c.execute("ALTER TABLE users ADD COLUMN activated INTEGER DEFAULT 0")\n'''
-          if "ALTER TABLE users ADD COLUMN activated INTEGER DEFAULT 0" not in text:
-              if marker not in text: raise SystemExit("Could not find user migration")
+          if 'ALTER TABLE users ADD COLUMN activated INTEGER DEFAULT 0' not in text:
+              marker = '''    if "role" not in user_columns:\n        c.execute("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user'")\n'''
+              addition = marker + '''    if "activated" not in user_columns:\n        c.execute("ALTER TABLE users ADD COLUMN activated INTEGER DEFAULT 0")\n'''
+              if marker not in text:
+                  raise SystemExit("Could not find user migration")
               text = text.replace(marker, addition, 1)
-
-          marker = '''@app.route("/invest", methods=["POST"])\n@login_required\ndef invest():\n    u = current()\n'''
-          replacement = '''@app.route("/invest", methods=["POST"])\n@login_required\ndef invest():\n    u = current()\n    if not u["activated"]:\n        flash("Activate your account to start investing.")\n        return redirect(url_for("activate"))\n'''
-          if marker in text and "Activate your account to start investing." not in text:
-              text = text.replace(marker, replacement, 1)
-
-          marker = '''@app.route("/investments")\n@login_required\ndef investments():\n    u = current()\n'''
-          replacement = '''@app.route("/investments")\n@login_required\ndef investments():\n    u = current()\n    if not u["activated"]:\n        return render_template("investments.html", user=u, items=[], plans=PLANS, locked=True)\n'''
-          if marker in text and 'render_template("investments.html", user=u, items=[], plans=PLANS, locked=True)' not in text:
-              text = text.replace(marker, replacement, 1)
-
-          marker = '''@app.route("/withdraw", methods=["GET", "POST"])\n@login_required\ndef withdraw():\n    u = current()\n'''
-          replacement = '''@app.route("/withdraw", methods=["GET", "POST"])\n@login_required\ndef withdraw():\n    u = current()\n    if not u["activated"]:\n        return render_template("withdraw.html", user=u, banks=[], locked=True)\n'''
-          if marker in text and "render_template(\"withdraw.html\", user=u, banks=[], locked=True)" not in text:
-              text = text.replace(marker, replacement, 1)
-
-          marker = '''@app.route("/referral")\n@login_required\ndef referral():\n    u = current()\n'''
-          replacement = '''@app.route("/referral")\n@login_required\ndef referral():\n    u = current()\n    if not u["activated"]:\n        return render_template("referral.html", user=u, referral_code=u["referral_code"], referrals=[], locked=True)\n'''
-          if marker in text and 'render_template("referral.html", user=u, referral_code=u["referral_code"], referrals=[], locked=True)' not in text:
-              text = text.replace(marker, replacement, 1)
-
-          marker = '''@app.route("/about")\ndef about():\n'''
-          activation_route = '''@app.route("/activate")\n@login_required\ndef activate():\n    u = current()\n    if u["activated"]:\n        flash("Your account is already activated.")\n        return redirect(url_for("dashboard"))\n    return render_template("activate.html", user=u)\n\n\n'''
-          if "@app.route(\"/activate\")" not in text:
-              if marker not in text: raise SystemExit("Could not find activation insertion point")
-              text = text.replace(marker, activation_route + marker, 1)
 
           path.write_text(text, encoding="utf-8")
           PY
 
-      - name: Patch locked-page buttons
+      - name: Verify templates are syntactically safe
         run: |
+          python -m py_compile app.py
           python - <<'PY'
           from pathlib import Path
-          path = Path("templates/withdraw.html")
-          text = path.read_text(encoding="utf-8")
-          if 'Activate Account' not in text:
-              text = '''{% extends "base.html" %}\n{% block content %}\n{% if locked %}\n<div class="card">\n  <p class="eyebrow">WITHDRAWALS</p>\n  <h1>Activate Account to Withdraw</h1>\n  <p class="muted">Withdrawal access is locked until your account has been activated.</p>\n  <a class="btn" href="{{ url_for('activate') }}">Activate Account</a>\n</div>\n{% else %}\n''' + text.split('{% block content %}',1)[1] + '\n{% endif %}\n{% endblock %}\n'
-              path.write_text(text, encoding="utf-8")
+          from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
-          path = Path("templates/referral.html")
-          text = path.read_text(encoding="utf-8")
-          if "{% if locked %}" not in text:
-              text = '''{% extends "base.html" %}\n{% block content %}\n{% if locked %}\n<div class="card">\n  <p class="eyebrow">REFERRALS</p>\n  <h1>Activate Account to Start Referring</h1>\n  <p class="muted">Referral tools are locked until your account has been activated.</p>\n  <a class="btn" href="{{ url_for('activate') }}">Activate Account</a>\n</div>\n{% else %}\n''' + text.split('{% block content %}',1)[1] + '\n{% endif %}\n{% endblock %}\n'
-              path.write_text(text, encoding="utf-8")
+          env = Environment(loader=FileSystemLoader("templates"), undefined=StrictUndefined)
+          for name in ["referral.html", "investments.html", "withdraw.html", "activate.html"]:
+              env.get_template(name)
+              print(f"OK: {name}")
           PY
 
-      - name: Verify Python
-        run: python -m py_compile app.py
-
-      - name: Commit activation changes
+      - name: Commit backend-only changes when needed
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app.py templates/investments.html templates/referral.html templates/withdraw.html templates/activate.html
+          git add app.py
           if git diff --cached --quiet; then
-            echo "No activation changes needed"
+            echo "No backend changes needed"
           else
-            git commit -m "Lock investments referral withdrawals until activation"
+            git commit -m "Maintain account activation backend controls"
             git push
           fi
