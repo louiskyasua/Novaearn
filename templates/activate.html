@@ -20,7 +20,10 @@
     .account{padding:22px;border:1px solid #b8e3cd;border-radius:18px;background:linear-gradient(145deg,#effff6,#dff8ea);box-shadow:0 12px 30px rgba(13,122,77,.10)}
     .account .label{font-size:.78rem;text-transform:uppercase;letter-spacing:.12em;font-weight:900;color:var(--green);margin-bottom:9px}
     .account .provider{font-size:1rem;font-weight:900;margin-bottom:8px;color:#111}
+    .account-row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
     .account .number{font-size:1.75rem;font-weight:900;letter-spacing:.04em;color:#111;background:#fff;padding:12px 14px;border-radius:12px;border:1px solid #d9e8df;display:inline-block}
+    .copy-btn{border:0;padding:11px 14px;border-radius:10px;background:#111;color:#fff;font-weight:800;cursor:pointer}
+    .copy-btn:hover{opacity:.9}
     .timer-box{margin-top:16px;padding:14px 16px;border-radius:14px;background:linear-gradient(135deg,#0d7a4d,#12a765);color:white;display:flex;justify-content:space-between;align-items:center;font-weight:900}
     .timer{font-variant-numeric:tabular-nums;font-size:1.05rem}
     .btn{display:inline-flex;align-items:center;justify-content:center;margin-top:18px;padding:13px 18px;border-radius:12px;background:var(--green);color:white;text-decoration:none;font-weight:850}
@@ -44,8 +47,11 @@
         <div class="account">
           <div class="label">Payment Account</div>
           <div class="provider">Moniepoint</div>
-          <div class="number">7060777834</div>
-              <p class="tiny-note">This payment destination can be linked to your Nova Earn account for future transactions.</p>
+          <div class="account-row">
+            <div class="number" id="accountNumber">7060777834</div>
+            <button class="copy-btn" type="button" id="copyAccount">Copy</button>
+          </div>
+          <p class="tiny-note">This payment destination can be linked to your Nova Earn account for future transactions.</p>
           <div class="timer-box">
             <span>ACCOUNT READY</span>
             <span class="timer" id="timer">2:00</span>
@@ -61,6 +67,25 @@
     const generating = document.getElementById('generating');
     const details = document.getElementById('details');
     const timer = document.getElementById('timer');
+    const copyButton = document.getElementById('copyAccount');
+    const accountNumber = document.getElementById('accountNumber').textContent.trim();
+
+    copyButton.addEventListener('click', async function () {
+      try {
+        await navigator.clipboard.writeText(accountNumber);
+        copyButton.textContent = 'Copied';
+        setTimeout(function () { copyButton.textContent = 'Copy'; }, 1600);
+      } catch (error) {
+        const input = document.createElement('input');
+        input.value = accountNumber;
+        document.body.appendChild(input);
+        input.select();
+        document.execCommand('copy');
+        input.remove();
+        copyButton.textContent = 'Copied';
+        setTimeout(function () { copyButton.textContent = 'Copy'; }, 1600);
+      }
+    });
 
     setTimeout(function () {
       generating.style.display = 'none';
