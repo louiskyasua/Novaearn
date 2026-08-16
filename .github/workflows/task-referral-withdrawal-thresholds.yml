@@ -1,0 +1,80 @@
+name: Enforce task and referral withdrawal thresholds
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch withdrawal thresholds
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('app.py')
+          s = p.read_text()
+
+          # Add source-aware thresholds and helper once.
+          marker = 'MAX_LOGIN_ATTEMPTS = 8\n'
+          insert = '''MAX_LOGIN_ATTEMPTS = 8\nMIN_TASK_WITHDRAWAL = 2000\nMIN_REFERRAL_WITHDRAWAL = 5000\n\n\ndef reward_balance(c, user_id, kind):\n    if kind == "task":\n        row = c.execute(\n            "SELECT COALESCE(SUM(amount),0) FROM transactions WHERE user_id=? AND kind='TASK_REWARD'",\n            (user_id,),\n        ).fetchone()\n        return int(row[0] or 0)\n    if kind == "referral":\n        row = c.execute(\n            "SELECT COALESCE(SUM(amount),0) FROM transactions WHERE user_id=? AND kind='REFERRAL_BONUS'",\n            (user_id,),\n        ).fetchone()\n        return int(row[0] or 0)\n    return 0\n\n'''
+          if 'MIN_TASK_WITHDRAWAL = 2000' not in s:
+              s = s.replace(marker, insert, 1)
+
+          # Add withdrawal source migration.
+          old = '''    withdrawal_columns = {\n        row[1]\n        for row in c.execute("PRAGMA table_info(withdrawals)").fetchall()\n    }\n    if "bank_code" not in withdrawal_columns:\n        c.execute("ALTER TABLE withdrawals ADD COLUMN bank_code TEXT")\n'''
+          new = '''    withdrawal_columns = {\n        row[1]\n        for row in c.execute("PRAGMA table_info(withdrawals)").fetchall()\n    }\n    if "bank_code" not in withdrawal_columns:\n        c.execute("ALTER TABLE withdrawals ADD COLUMN bank_code TEXT")\n    if "balance_type" not in withdrawal_columns:\n        c.execute("ALTER TABLE withdrawals ADD COLUMN balance_type TEXT DEFAULT 'main'")\n'''
+          if old in s and 'ALTER TABLE withdrawals ADD COLUMN balance_type' not in s:
+              s = s.replace(old, new, 1)
+
+          # Capture the balance source and enforce its own threshold.
+          old = '''        account_name = request.form.get("account_name", "").strip()\n\n        # The selected bank determines the bank code.'''
+          new = '''        account_name = request.form.get("account_name", "").strip()\n        balance_type = request.form.get("balance_type", "main").strip().lower()\n        if balance_type not in {"main", "task", "referral"}:\n            flash("Invalid withdrawal balance source.")\n            return redirect(url_for("withdraw"))\n\n        if balance_type == "task":\n            minimum_for_source = MIN_TASK_WITHDRAWAL\n            source_balance = reward_balance(db(), u["id"], "task")\n        elif balance_type == "referral":\n            minimum_for_source = MIN_REFERRAL_WITHDRAWAL\n            source_balance = reward_balance(db(), u["id"], "referral")\n        else:\n            minimum_for_source = 1500\n            source_balance = u["balance"]\n\n        if amount < minimum_for_source:\n            label = "task rewards" if balance_type == "task" else "referral rewards" if balance_type == "referral" else "your balance"\n            flash(f"Minimum withdrawal from {label} is ₦{minimum_for_source:,}.")\n            return redirect(url_for("withdraw"))\n        if balance_type in {"task", "referral"} and source_balance < amount:\n            label = "task rewards" if balance_type == "task" else "referral rewards"\n            flash(f"Insufficient {label} balance.")\n            return redirect(url_for("withdraw"))\n\n        # The selected bank determines the bank code.'''
+          if old in s and 'balance_type = request.form.get("balance_type"' not in s:
+              s = s.replace(old, new, 1)
+
+          old = 'if not 1500 <= amount <= 800000:\n            flash("Withdrawal amount must be between ₦1,500 and ₦800,000.")\n            return redirect(url_for("withdraw"))\n'
+          new = 'if not 1500 <= amount <= 800000:\n            flash("Withdrawal amount must be between ₦1,500 and ₦800,000.")\n            return redirect(url_for("withdraw"))\n'
+          # Keep general upper/lower validation; source-specific minimum above controls task/referral.
+
+          # Persist the source on withdrawals and transaction notes.
+          old = '''                    destination,destination_number,account_name,bank_code\n                )\n                VALUES(?,?,?,?,?,?,?,?)'''
+          new = '''                    destination,destination_number,account_name,bank_code,balance_type\n                )\n                VALUES(?,?,?,?,?,?,?,?,?)'''
+          if old in s and 'destination,destination_number,account_name,bank_code,balance_type' not in s:
+              s = s.replace(old, new, 1)
+
+          old = '''                    destination_number,\n                    account_name,\n                    bank_code,\n                ),'''
+          new = '''                    destination_number,\n                    account_name,\n                    bank_code,\n                    balance_type,\n                ),'''
+          if old in s and '                    balance_type,\n                ),' not in s:
+              s = s.replace(old, new, 1)
+
+          old = '"WITHDRAWAL",\n                    -amount,\n                    f"Withdrawal request to {destination}",'
+          new = '"WITHDRAWAL",\n                    -amount,\n                    f"Withdrawal request from {balance_type} balance to {destination}",'
+          if old in s:
+              s = s.replace(old, new, 1)
+
+          p.write_text(s)
+          PY
+
+      - name: Patch withdrawal template
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('templates/withdraw.html')
+          s = p.read_text()
+          if 'balance_type' not in s:
+              s = '''{% extends "base.html" %}\n{% block content %}\n{% if locked %}\n<div class="card">\n  <p class="eyebrow">WITHDRAWALS</p>\n  <h1>Activate Account to Withdraw</h1>\n  <p class="muted">Withdrawal access is locked until your account has been activated.</p>\n  <a class="btn" href="{{ url_for('activate') }}" target="_blank" rel="noopener">Activate Account</a>\n</div>\n{% else %}\n<div class="card">\n  <p class="eyebrow">WITHDRAWALS</p>\n  <h1>Request a Withdrawal</h1>\n  <p class="muted">Choose which rewards balance you want to withdraw from.</p>\n  <form method="post">\n    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">\n    <label>Balance source</label>\n    <select name="balance_type" required>\n      <option value="main">Main balance — minimum ₦1,500</option>\n      <option value="task">Task rewards — minimum ₦2,000</option>\n      <option value="referral">Referral rewards — minimum ₦5,000</option>\n    </select>\n    <label>Amount</label>\n    <input name="amount" type="number" min="1500" step="1" required>\n    <label>Destination</label>\n    <input name="destination" required placeholder="Bank / wallet provider">\n    <label>Account number</label>\n    <input name="destination_number" inputmode="numeric" required>\n    <label>Account name</label>\n    <input name="account_name">\n    <button class="btn" type="submit">Submit Withdrawal</button>\n  </form>\n</div>\n{% endif %}\n{% endblock %}\n'''
+              p.write_text(s)
+          PY
+
+      - name: Verify Python syntax
+        run: python -m py_compile app.py
+
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.py templates/withdraw.html
+          git diff --cached --quiet || git commit -m "Set task and referral withdrawal minimums"
+          git push
