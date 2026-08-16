@@ -1,0 +1,45 @@
+name: Fix AI task routes
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Remove duplicate task admin routes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('app.py')
+          text = path.read_text(encoding='utf-8')
+          marker = '@app.route("/admin/task-proof/<int:submission_id>")\n'
+          first = text.find(marker)
+          second = text.find(marker, first + len(marker)) if first != -1 else -1
+          if first != -1 and second != -1:
+              # The first copy includes admin_task_proof + admin_update_task.
+              text = text[:first] + text[second:]
+          path.write_text(text, encoding='utf-8')
+          PY
+      - name: Verify
+        run: |
+          python -m py_compile app.py task_verifier.py
+          python - <<'PY'
+          from pathlib import Path
+          text = Path('app.py').read_text(encoding='utf-8')
+          assert text.count('@app.route("/admin/task-proof/<int:submission_id>")') == 1
+          assert text.count('@app.route("/admin/update-task/<int:submission_id>/<action>"') == 1
+          print('AI task admin routes: OK')
+          PY
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.py
+          if git diff --cached --quiet; then echo "No changes needed"; else git commit -m "Fix duplicate AI task admin routes"; git push; fi
