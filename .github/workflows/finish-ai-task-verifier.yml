@@ -1,0 +1,68 @@
+name: Finish AI task verifier
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  finish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Add task routes
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('app.py')
+          text = path.read_text(encoding='utf-8')
+
+          if '@app.route("/tasks")' not in text:
+              marker = '@app.route("/activate")\n@login_required\ndef activate():\n'
+              block = '''@app.route("/tasks")\n@login_required\ndef tasks():\n    u = current()\n    c = db()\n    rows = c.execute(\n        "SELECT * FROM task_submissions WHERE user_id=? ORDER BY id DESC",\n        (u["id"],),\n    ).fetchall()\n    c.close()\n    submissions = {row["task_key"]: row for row in rows}\n    return render_template("tasks.html", tasks=TASKS, submissions=submissions, user=u)\n\n\n@app.route("/tasks/submit", methods=["POST"])\n@login_required\ndef submit_task():\n    task_key = request.form.get("task_key", "").strip()\n    task = TASKS.get(task_key)\n    proof = request.files.get("proof")\n    if not task or not proof or not proof.filename:\n        flash("Select a valid task and screenshot.")\n        return redirect(url_for("tasks"))\n\n    extension = proof.filename.rsplit(".", 1)[-1].lower() if "." in proof.filename else ""\n    if extension not in ALLOWED_TASK_PROOF_EXTENSIONS:\n        flash("Proof must be JPG, PNG, or WebP.")\n        return redirect(url_for("tasks"))\n\n    safe_name = secrets.token_hex(16) + "." + extension\n    proof_path = os.path.join(TASK_UPLOAD_DIR, safe_name)\n    proof.save(proof_path)\n    if os.path.getsize(proof_path) > MAX_TASK_PROOF_SIZE:\n        os.remove(proof_path)\n        flash("Proof image is too large. Maximum size is 2 MB.")\n        return redirect(url_for("tasks"))\n\n    u = current()\n    c = db()\n    try:\n        existing = c.execute(\n            "SELECT id FROM task_submissions WHERE user_id=? AND task_key=?",\n            (u["id"], task_key),\n        ).fetchone()\n        if existing:\n            c.rollback()\n            os.remove(proof_path)\n            flash("You have already submitted this task.")\n            return redirect(url_for("tasks"))\n\n        ai = analyze_submission(task_key, proof_path)\n        c.execute(\n            """\n            INSERT INTO task_submissions(\n                user_id,task_key,reward,proof_path,status,ai_status,ai_confidence,ai_reason,created_at\n            ) VALUES(?,?,?,?,?,?,?,?,?)\n            """,\n            (u["id"], task_key, task["reward"], proof_path, "pending", ai["status"], ai["confidence"], ai["reason"], datetime.now().isoformat()),\n        )\n        c.commit()\n    except Exception:\n        c.rollback()\n        if os.path.exists(proof_path):\n            os.remove(proof_path)\n        flash("Unable to submit task proof.")\n        return redirect(url_for("tasks"))\n    finally:\n        c.close()\n    flash("Proof submitted. AI verification result is available to the admin reviewer.")\n    return redirect(url_for("tasks"))\n\n\n'''
+              if marker not in text:
+                  raise SystemExit('activation marker not found')
+              text = text.replace(marker, block + marker, 1)
+
+          if '@app.route("/admin/tasks")' not in text:
+              marker = '@app.route("/admin/deposit-proof/<int:deposit_id>")\n'
+              block = '''@app.route("/admin/tasks")\n@admin_required\ndef admin_tasks():\n    c = db()\n    submissions = c.execute(\n        """\n        SELECT ts.*, u.name, u.email\n        FROM task_submissions ts\n        JOIN users u ON u.id=ts.user_id\n        ORDER BY ts.id DESC\n        """\n    ).fetchall()\n    c.close()\n    return render_template("admin_tasks.html", submissions=submissions, tasks=TASKS)\n\n\n@app.route("/admin/task-proof/<int:submission_id>")\n@admin_required\ndef admin_task_proof(submission_id):\n    c = db()\n    row = c.execute("SELECT proof_path FROM task_submissions WHERE id=?", (submission_id,)).fetchone()\n    c.close()\n    if not row or not row["proof_path"]:\n        abort(404)\n    return send_from_directory(TASK_UPLOAD_DIR, os.path.basename(row["proof_path"]), as_attachment=False)\n\n\n@app.route("/admin/update-task/<int:submission_id>/<action>", methods=["POST"])\n@admin_required\ndef admin_update_task(submission_id, action):\n    if action not in {"approve", "reject"}:\n        flash("Invalid task action.")\n        return redirect(url_for("admin_tasks"))\n    c = db()\n    try:\n        submission = c.execute("SELECT * FROM task_submissions WHERE id=?", (submission_id,)).fetchone()\n        if not submission or submission["status"] != "pending":\n            c.rollback()\n            flash("Task submission is no longer pending.")\n            return redirect(url_for("admin_tasks"))\n        status = "approved" if action == "approve" else "rejected"\n        result = c.execute(\n            "UPDATE task_submissions SET status=?, reviewed_at=? WHERE id=? AND status='pending'",\n            (status, datetime.now().isoformat(), submission_id),\n        )\n        if result.rowcount != 1:\n            c.rollback()\n            flash("Task submission is no longer pending.")\n            return redirect(url_for("admin_tasks"))\n        if action == "approve":\n            c.execute("UPDATE users SET balance=balance+? WHERE id=?", (submission["reward"], submission["user_id"]))\n            c.execute(\n                "INSERT INTO transactions(user_id,kind,amount,note,created_at) VALUES(?,?,?,?,?)",\n                (submission["user_id"], "TASK_REWARD", submission["reward"], f"Task reward approved: {submission['task_key']}", datetime.now().isoformat()),\n            )\n        c.commit()\n    except Exception:\n        c.rollback()\n        flash("Unable to update task submission.")\n        return redirect(url_for("admin_tasks"))\n    finally:\n        c.close()\n    flash(f"Task submission {status}.")\n    return redirect(url_for("admin_tasks"))\n\n\n'''
+              if marker not in text:
+                  raise SystemExit('admin proof marker not found')
+              text = text.replace(marker, block + marker, 1)
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Add admin task link
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('templates/admin.html')
+          text = path.read_text(encoding='utf-8')
+          if 'Task Reviews' not in text:
+              text = text.replace('<a class="btn" href="/dashboard">Dashboard</a>', '<a class="btn" href="/dashboard">Dashboard</a> <a class="btn" href="{{ url_for(\'admin_tasks\') }}">Task Reviews</a>', 1)
+              path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Verify
+        run: |
+          python -m py_compile app.py task_verifier.py
+          python - <<'PY'
+          from jinja2 import Environment, FileSystemLoader
+          env = Environment(loader=FileSystemLoader('templates'))
+          for name in ['tasks.html','admin_tasks.html','admin.html','dashboard.html']:
+              env.get_template(name)
+              print('OK', name)
+          PY
+
+      - name: Commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app.py templates/admin.html
+          if git diff --cached --quiet; then echo "No changes needed"; else git commit -m "Finish AI task verifier routes"; git push; fi
