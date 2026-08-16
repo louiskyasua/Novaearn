@@ -17,28 +17,25 @@ jobs:
         run: |
           python - <<'PY'
           from pathlib import Path
-          import re
 
           path = Path('app.py')
-          text = path.read_text(encoding='utf-8')
+          lines = path.read_text(encoding='utf-8').splitlines(keepends=True)
 
-          def keep_first_route_block(source, decorator):
-              marker = f'@app.route("{decorator}")'
-              starts = [m.start() for m in re.finditer(re.escape(marker), source)]
+          def dedupe_route(lines, marker):
+              starts = [i for i, line in enumerate(lines) if line.strip() == marker]
               if len(starts) <= 1:
-                  return source
-
-              # Keep the first complete route block and remove later duplicate
-              # blocks up to the next top-level Flask route decorator.
+                  return lines
+              # Remove every duplicate block, keeping the first registered route.
               for start in reversed(starts[1:]):
-                  next_route = re.search(r'\n@app\.route\(', source[start + len(marker):])
-                  end = start + len(marker) + next_route.start() + 1 if next_route else len(source)
-                  source = source[:start] + source[end:]
-              return source
+                  end = start + 1
+                  while end < len(lines) and not lines[end].lstrip().startswith('@app.route('):
+                      end += 1
+                  del lines[start:end]
+              return lines
 
-          text = keep_first_route_block(text, '/admin/task-proof/<int:submission_id>')
-          text = keep_first_route_block(text, '/admin/update-task/<int:submission_id>/<action>')
-          path.write_text(text, encoding='utf-8')
+          lines = dedupe_route(lines, '@app.route("/admin/task-proof/<int:submission_id>")')
+          lines = dedupe_route(lines, '@app.route("/admin/update-task/<int:submission_id>/<action>", methods=["POST"])')
+          path.write_text(''.join(lines), encoding='utf-8')
           PY
       - name: Verify
         run: |
@@ -46,8 +43,8 @@ jobs:
           python - <<'PY'
           from pathlib import Path
           text = Path('app.py').read_text(encoding='utf-8')
-          assert text.count('@app.route("/admin/task-proof/<int:submission_id>")') == 1
-          assert text.count('@app.route("/admin/update-task/<int:submission_id>/<action>"') == 1
+          assert text.count('@app.route("/admin/task-proof/<int:submission_id>")') == 1, 'task-proof route count is wrong'
+          assert text.count('@app.route("/admin/update-task/<int:submission_id>/<action>", methods=["POST"])') == 1, 'update-task route count is wrong'
           print('AI task admin routes: OK')
           PY
       - name: Commit
