@@ -46,4 +46,21 @@
     </tr>{% else %}<tr><td colspan="7">No withdrawals yet.</td></tr>{% endfor %}
   </table></div>
 </section>
+
+<section>
+  <div class="sectionhead"><h2>Task proof submissions</h2></div>
+  <div class="table"><table>
+    <tr><th>User</th><th>Task</th><th>Reward</th><th>AI</th><th>Confidence</th><th>Proof</th><th>Date</th><th>Status</th><th>Action</th></tr>
+    {% for s in task_submissions %}<tr>
+      <td>{{ s.name }}</td><td>{{ tasks[s.task_key].title if s.task_key in tasks else s.task_key }}</td><td>₦{{ "{:,}".format(s.reward) }}</td>
+      <td>{{ s.ai_status|replace('_',' ')|title }}</td><td>{{ (s.ai_confidence * 100)|round(0) }}%</td>
+      <td><a class="btn" href="{{ url_for('admin_task_proof', submission_id=s.id) }}" target="_blank" rel="noopener">View proof</a></td>
+      <td>{{ s.created_at[:16] if s.created_at else "—" }}</td><td><span class="status">{{ s.status }}</span></td>
+      <td>{% if s.status == 'pending' %}
+        <form method="post" action="/admin/update-task/{{ s.id }}/approve" style="display:inline"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="btn" type="submit">Approve</button></form>
+        <form method="post" action="/admin/update-task/{{ s.id }}/reject" style="display:inline"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button class="btn" type="submit">Reject</button></form>
+      {% else %}—{% endif %}</td>
+    </tr>{% else %}<tr><td colspan="9">No task submissions yet.</td></tr>{% endfor %}
+  </table></div>
+</section>
 {% endblock %}

@@ -21,6 +21,7 @@ from werkzeug.security import generate_password_hash, check_password_hash
 
 import config as nova_config
 from config import ALLOWED_PAYMENT_PROVIDERS, PAYMENT_ACCOUNTS
+from task_verifier import TASKS, analyze_submission
 
 
 app = Flask(__name__)
@@ -50,6 +51,10 @@ DATA_DIR = os.environ.get("NOVA_DATA_DIR", "instance")
 os.makedirs(DATA_DIR, exist_ok=True)
 DB = os.environ.get("NOVA_DB_PATH", os.path.join(DATA_DIR, "novaearn.db"))
 UPLOAD_DIR = os.environ.get("NOVA_UPLOAD_DIR", os.path.join(DATA_DIR, "deposit_proofs"))
+TASK_UPLOAD_DIR = os.environ.get("NOVA_TASK_UPLOAD_DIR", os.path.join(DATA_DIR, "task_proofs"))
+os.makedirs(TASK_UPLOAD_DIR, exist_ok=True)
+MAX_TASK_PROOF_SIZE = 2 * 1024 * 1024
+ALLOWED_TASK_PROOF_EXTENSIONS = {"jpg", "jpeg", "png", "webp"}
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 MAX_PROOF_SIZE = 5 * 1024 * 1024
 ALLOWED_PROOF_EXTENSIONS = {"jpg", "jpeg", "png", "webp"}
@@ -172,6 +177,8 @@ def protect_state_changing_requests():
         "profile",
         "admin_update_deposit",
         "admin_update_withdrawal",
+        "submit_task",
+        "admin_update_task",
     }
     if request.endpoint in protected_endpoints:
         validate_csrf()
@@ -245,6 +252,20 @@ def init_db():
             amount INTEGER,
             note TEXT,
             created_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS task_submissions(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            task_key TEXT NOT NULL,
+            reward INTEGER NOT NULL,
+            proof_path TEXT NOT NULL,
+            status TEXT DEFAULT 'pending',
+            ai_status TEXT DEFAULT 'needs_review',
+            ai_confidence REAL DEFAULT 0,
+            ai_reason TEXT,
+            created_at TEXT,
+            reviewed_at TEXT,
+            UNIQUE(user_id, task_key)
         );
         """
     )
@@ -1097,6 +1118,88 @@ def profile():
     return render_template("profile.html", user=u)
 
 
+@app.route("/tasks")
+@login_required
+def tasks():
+    u = current()
+    c = db()
+    rows = c.execute(
+        "SELECT * FROM task_submissions WHERE user_id=? ORDER BY id DESC",
+        (u["id"],),
+    ).fetchall()
+    c.close()
+    submissions = {row["task_key"]: row for row in rows}
+    return render_template("tasks.html", tasks=TASKS, submissions=submissions, user=u)
+
+
+@app.route("/tasks/submit", methods=["POST"])
+@login_required
+def submit_task():
+    task_key = request.form.get("task_key", "").strip()
+    task = TASKS.get(task_key)
+    proof = request.files.get("proof")
+    if not task or not proof or not proof.filename:
+        flash("Select a valid task and screenshot.")
+        return redirect(url_for("tasks"))
+
+    extension = proof.filename.rsplit(".", 1)[-1].lower() if "." in proof.filename else ""
+    if extension not in ALLOWED_TASK_PROOF_EXTENSIONS:
+        flash("Proof must be JPG, PNG, or WebP.")
+        return redirect(url_for("tasks"))
+
+    safe_name = secrets.token_hex(16) + "." + extension
+    proof_path = os.path.join(TASK_UPLOAD_DIR, safe_name)
+    proof.save(proof_path)
+    if os.path.getsize(proof_path) > MAX_TASK_PROOF_SIZE:
+        os.remove(proof_path)
+        flash("Proof image is too large. Maximum size is 2 MB.")
+        return redirect(url_for("tasks"))
+
+    u = current()
+    c = db()
+    try:
+        existing = c.execute(
+            "SELECT id, status FROM task_submissions WHERE user_id=? AND task_key=?",
+            (u["id"], task_key),
+        ).fetchone()
+        if existing:
+            c.rollback()
+            os.remove(proof_path)
+            flash("You have already submitted this task.")
+            return redirect(url_for("tasks"))
+
+        ai = analyze_submission(task_key, proof_path)
+        c.execute(
+            """
+            INSERT INTO task_submissions(
+                user_id,task_key,reward,proof_path,status,ai_status,ai_confidence,ai_reason,created_at
+            ) VALUES(?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                u["id"],
+                task_key,
+                task["reward"],
+                proof_path,
+                "pending",
+                ai["status"],
+                ai["confidence"],
+                ai["reason"],
+                datetime.now().isoformat(),
+            ),
+        )
+        c.commit()
+    except Exception:
+        c.rollback()
+        if os.path.exists(proof_path):
+            os.remove(proof_path)
+        flash("Unable to submit task proof.")
+        return redirect(url_for("tasks"))
+    finally:
+        c.close()
+    flash("Proof submitted. AI verification result is available to the admin reviewer.")
+    return redirect(url_for("tasks"))
+
+
 @app.route("/activate")
 @login_required
 def activate():
@@ -1163,13 +1266,88 @@ def admin():
         ORDER BY w.id DESC
         """
     ).fetchall()
+    task_submissions = c.execute(
+        """
+        SELECT ts.*, u.name, u.email
+        FROM task_submissions ts
+        JOIN users u ON u.id=ts.user_id
+        ORDER BY ts.id DESC
+        """
+    ).fetchall()
     c.close()
     return render_template(
         "admin.html",
         users=users,
         deposits=deps,
         withdrawals=wd,
+        task_submissions=task_submissions,
+        tasks=TASKS,
     )
+
+
+@app.route("/admin/task-proof/<int:submission_id>")
+@admin_required
+def admin_task_proof(submission_id):
+    c = db()
+    row = c.execute("SELECT proof_path FROM task_submissions WHERE id=?", (submission_id,)).fetchone()
+    c.close()
+    if not row or not row["proof_path"]:
+        abort(404)
+    filename = os.path.basename(row["proof_path"])
+    return send_from_directory(TASK_UPLOAD_DIR, filename, as_attachment=False)
+
+
+@app.route("/admin/update-task/<int:submission_id>/<action>", methods=["POST"])
+@admin_required
+def admin_update_task(submission_id, action):
+    if action not in {"approve", "reject"}:
+        flash("Invalid task action.")
+        return redirect(url_for("admin"))
+    c = db()
+    try:
+        submission = c.execute(
+            "SELECT * FROM task_submissions WHERE id=?", (submission_id,)
+        ).fetchone()
+        if not submission or submission["status"] != "pending":
+            c.rollback()
+            flash("Task submission is no longer pending.")
+            return redirect(url_for("admin"))
+        status = "approved" if action == "approve" else "rejected"
+        result = c.execute(
+            "UPDATE task_submissions SET status=?, reviewed_at=? WHERE id=? AND status='pending'",
+            (status, datetime.now().isoformat(), submission_id),
+        )
+        if result.rowcount != 1:
+            c.rollback()
+            flash("Task submission is no longer pending.")
+            return redirect(url_for("admin"))
+        if action == "approve":
+            c.execute(
+                "UPDATE users SET balance=balance+? WHERE id=?",
+                (submission["reward"], submission["user_id"]),
+            )
+            c.execute(
+                """
+                INSERT INTO transactions(user_id,kind,amount,note,created_at)
+                VALUES(?,?,?,?,?)
+                """,
+                (
+                    submission["user_id"],
+                    "TASK_REWARD",
+                    submission["reward"],
+                    f"Task reward approved: {submission['task_key']}",
+                    datetime.now().isoformat(),
+                ),
+            )
+        c.commit()
+    except Exception:
+        c.rollback()
+        flash("Unable to update task submission.")
+        return redirect(url_for("admin"))
+    finally:
+        c.close()
+    flash(f"Task submission {status}.")
+    return redirect(url_for("admin"))
 
 
 @app.route("/admin/deposit-proof/<int:deposit_id>")
