@@ -13,15 +13,16 @@
     .eyebrow{margin:0 0 10px;color:var(--green);font-size:.78rem;font-weight:900;letter-spacing:.15em;text-transform:uppercase}
     h1{margin:0 0 12px;font-size:clamp(2rem,7vw,3.2rem);line-height:1.05;letter-spacing:-.04em}
     p{line-height:1.65}.muted{color:var(--muted)}
-    .status{margin:20px 0 8px;padding:16px;border-radius:15px;background:linear-gradient(135deg,var(--green),var(--green2));color:white;font-weight:800;display:flex;align-items:center;justify-content:space-between;gap:12px}
+    .status{margin:20px 0 8px;padding:16px;border-radius:15px;background:linear-gradient(135deg,var(--green),var(--green2));color:white;font-weight:800;display:flex;align-items:center;gap:12px}
     .spinner{width:20px;height:20px;border:3px solid rgba(255,255,255,.35);border-top-color:#fff;border-radius:50%;animation:spin .9s linear infinite;flex:none}
     .tiny-note{font-size:.72rem;color:var(--muted);margin:0 0 18px}
     .details{display:none;margin-top:20px}
     .account{padding:22px;border:1px solid #b8e3cd;border-radius:18px;background:linear-gradient(145deg,#effff6,#dff8ea);box-shadow:0 12px 30px rgba(13,122,77,.10)}
     .account .label{font-size:.78rem;text-transform:uppercase;letter-spacing:.12em;font-weight:900;color:var(--green);margin-bottom:9px}
-    .account .provider{font-size:1rem;font-weight:900;margin-bottom:8px}
+    .account .provider{font-size:1rem;font-weight:900;margin-bottom:8px;color:#111}
     .account .number{font-size:1.75rem;font-weight:900;letter-spacing:.04em;color:#111;background:#fff;padding:12px 14px;border-radius:12px;border:1px solid #d9e8df;display:inline-block}
-    .provider-opay{color:#1976d2}.provider-palmpay{color:#7b1fa2}.provider-moniepoint{color:#ef6c00}.provider-momo{color:#c62828}.provider-egbank{color:#111}
+    .timer-box{margin-top:16px;padding:14px 16px;border-radius:14px;background:linear-gradient(135deg,#0d7a4d,#12a765);color:white;display:flex;justify-content:space-between;align-items:center;font-weight:900}
+    .timer{font-variant-numeric:tabular-nums;font-size:1.05rem}
     .btn{display:inline-flex;align-items:center;justify-content:center;margin-top:18px;padding:13px 18px;border-radius:12px;background:var(--green);color:white;text-decoration:none;font-weight:850}
     .small{font-size:.9rem}
     @keyframes spin{to{transform:rotate(360deg)}}
@@ -34,17 +35,21 @@
       <h1>Activate Your Account</h1>
 
       <div class="status" id="generating">
-        <span style="display:flex;align-items:center;gap:12px"><span class="spinner" aria-hidden="true"></span><span>GENERATING VIRTUAL ACCOUNT</span></span>
+        <span class="spinner" aria-hidden="true"></span>
+        <span>GENERATING VIRTUAL ACCOUNT</span>
       </div>
+      <p class="tiny-note">Please keep this page open while the account is being prepared.</p>
 
       <div class="details" id="details">
         <div class="account">
-          <div class="label">Payment Details</div>
-                        <p class="small muted">Use only the payment details displayed through Nova Earn's official, verified payment configuration.</p>
+          <div class="label">Payment Account</div>
+          <div class="provider">Moniepoint</div>
+          <div class="number">7060777834</div>
+          <p class="small muted"><strong>Account name:</strong> novaearn fac</p>
           <p class="tiny-note">This payment destination can be linked to your Nova Earn account for future transactions.</p>
-          <div class="status" style="margin-top:16px;background:linear-gradient(135deg,#0d7a4d,#12a765)">
+          <div class="timer-box">
             <span>ACCOUNT READY</span>
-            <span id="timer">2:00</span>
+            <span class="timer" id="timer">2:00</span>
           </div>
         </div>
       </div>
@@ -63,17 +68,17 @@
       details.style.display = 'block';
 
       let remaining = 120;
-      timer.textContent = '2:00';
-
       const tick = setInterval(function () {
-        remaining -= 1;
         const minutes = Math.floor(remaining / 60);
         const seconds = remaining % 60;
         timer.textContent = minutes + ':' + String(seconds).padStart(2, '0');
+
         if (remaining <= 0) {
           clearInterval(tick);
           timer.textContent = '0:00';
+          return;
         }
+        remaining -= 1;
       }, 1000);
     }, 2200);
   </script>
