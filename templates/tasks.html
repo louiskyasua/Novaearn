@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="pagehead">
+  <div>
+    <p class="eyebrow">REWARDS</p>
+    <h1>Tasks & Rewards</h1>
+    <p class="muted">Complete a task, upload proof, and our AI verifier will assess the screenshot. Rewards remain pending until review.</p>
+  </div>
+  <a class="btn" href="{{ url_for('dashboard') }}">Dashboard</a>
+</div>
+
+<div class="grid">
+  {% for key, task in tasks.items() %}
+  {% set existing = submissions.get(key) %}
+  <div class="card">
+    <p class="eyebrow">{{ task.platform }}</p>
+    <h2>{{ task.title }}</h2>
+    <p class="muted">Reward: <strong>₦{{ "{:,}".format(task.reward) }}</strong></p>
+    <p>{{ task.instruction }}</p>
+    <a class="btn" href="{{ task.url }}" target="_blank" rel="noopener">Open Task</a>
+
+    {% if existing %}
+      <div class="card" style="margin-top:16px;padding:16px">
+        <strong>Status: {{ existing.status|replace('_',' ')|title }}</strong>
+        <p class="muted" style="margin-bottom:0">AI: {{ existing.ai_status|replace('_',' ')|title }} · confidence {{ (existing.ai_confidence * 100)|round(0) }}%</p>
+      </div>
+    {% else %}
+      <form method="post" action="{{ url_for('submit_task') }}" enctype="multipart/form-data" style="margin-top:16px">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="task_key" value="{{ key }}">
+        <label for="proof-{{ key }}">Upload screenshot</label>
+        <input id="proof-{{ key }}" name="proof" type="file" accept="image/jpeg,image/png,image/webp" required>
+        <button class="btn" type="submit">Submit for AI Verification</button>
+      </form>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}
