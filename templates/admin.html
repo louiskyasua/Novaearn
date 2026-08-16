@@ -3,7 +3,7 @@
 {% block content %}
 <div class="pagehead">
   <div><p class="eyebrow">ADMIN</p><h1>NovaEarn Admin Dashboard</h1><p class="muted">Review registered users, deposits and withdrawals.</p></div>
-  <a class="btn" href="/dashboard">Dashboard</a>
+  <a class="btn" href="/dashboard">Dashboard</a> <a class="btn" href="{{ url_for('admin_tasks') }}">Task Reviews</a>
 </div>
 <div class="stats">
   <div><small>Registered users</small><strong>{{ users|length }}</strong></div>
