@@ -17,51 +17,14 @@
   <a class="btn" href="{{ url_for('deposit') }}">Deposit</a>
   <a class="btn" href="{{ url_for('withdraw') }}">Withdraw</a>
   <a class="btn" href="{{ url_for('investments') }}">Invest</a>
+  <a class="btn" href="{{ url_for('tasks') }}">Tasks & Rewards</a>
 </div>
 
 <div class="card">
   <p class="eyebrow">EARN REWARDS</p>
   <h2>Social & Referral Tasks</h2>
-  <p class="muted">Complete the tasks below and keep your proof of completion for verification.</p>
-
-  <div class="grid">
-    <div class="card">
-      <h3>TikTok Follow</h3>
-      <p>Follow <strong>@lou_kyasua.aep</strong> on TikTok.</p>
-      <p><strong>Reward: ₦50</strong></p>
-      <a class="btn" href="https://www.tiktok.com/@lou_kyasua.aep?is_from_webapp=1&sender_device=pc" target="_blank" rel="noopener">Follow on TikTok</a>
-    </div>
-
-    <div class="card">
-      <h3>YouTube Subscribe</h3>
-      <p>Subscribe to <strong>Kyasua Louis</strong> on YouTube.</p>
-      <p><strong>Reward: ₦30</strong></p>
-      <a class="btn" href="https://www.youtube.com/@KyasuaLouis-f8u" target="_blank" rel="noopener">Subscribe on YouTube</a>
-    </div>
-
-    <div class="card">
-      <h3>Follow on X</h3>
-      <p>Follow the account on X.</p>
-      <p><strong>Reward: ₦25</strong></p>
-      <a class="btn" href="https://x.com/Sephora" target="_blank" rel="noopener">Follow on X</a>
-    </div>
-
-    <div class="card">
-      <h3>Follow on Facebook</h3>
-      <p>Follow the Facebook page.</p>
-      <p><strong>Reward: ₦20</strong></p>
-      <a class="btn" href="https://www.facebook.com/100085446753897/" target="_blank" rel="noopener">Follow on Facebook</a>
-    </div>
-
-    <div class="card">
-      <h3>PalmPay Referral</h3>
-      <p>Join PalmPay using the referral link or code <strong>LGKJ4521</strong>.</p>
-      <p><strong>Reward: ₦200 after verification</strong></p>
-      <a class="btn" href="https://info.palmpay.com/5r3CBVK_" target="_blank" rel="noopener">Join PalmPay</a>
-    </div>
-  </div>
-
-  <p class="muted"><small>Keep a screenshot of completed tasks. Rewards should remain pending until proof has been reviewed.</small></p>
+  <p class="muted">Complete the tasks below and submit proof from the Tasks & Rewards page.</p>
+  <a class="btn" href="{{ url_for('tasks') }}">Open Tasks & Rewards</a>
 </div>
 
 <h2>Recent transactions</h2>
