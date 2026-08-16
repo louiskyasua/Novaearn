@@ -49,7 +49,7 @@ TASKS = {
 }
 
 
-def _data_url(path):
+def _image_data(path):
     ext = os.path.splitext(path)[1].lower()
     mime = {
         ".jpg": "image/jpeg",
@@ -59,7 +59,27 @@ def _data_url(path):
     }.get(ext, "application/octet-stream")
     with open(path, "rb") as fh:
         data = base64.b64encode(fh.read()).decode("ascii")
-    return f"data:{mime};base64,{data}"
+    return mime, data
+
+
+def _extract_json(text):
+    """Extract the verifier JSON even if the model wraps it in a markdown fence."""
+    text = (text or "").strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        text = "\n".join(lines).strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        start = text.find("{")
+        end = text.rfind("}")
+        if start >= 0 and end > start:
+            return json.loads(text[start : end + 1])
+        raise
 
 
 def analyze_submission(task_key, proof_path):
@@ -71,7 +91,9 @@ def analyze_submission(task_key, proof_path):
             "reason": "Unknown task.",
         }
 
-    api_key = os.environ.get("OPENAI_API_KEY", "").strip()
+    # Gemini 2.5 Flash-Lite supports image input and currently has a free API tier.
+    # The key is kept server-side in GEMINI_API_KEY; never put it in the browser or repo.
+    api_key = os.environ.get("GEMINI_API_KEY", "").strip()
     if not api_key:
         return {
             "status": "needs_review",
@@ -79,44 +101,71 @@ def analyze_submission(task_key, proof_path):
             "reason": "AI verifier is not configured; manual admin review required.",
         }
 
+    try:
+        mime_type, image_b64 = _image_data(proof_path)
+    except (OSError, ValueError) as exc:
+        return {
+            "status": "needs_review",
+            "confidence": 0.0,
+            "reason": f"Could not read screenshot; manual review required. ({type(exc).__name__})",
+        }
+
+    prompt = (
+        "You are an evidence-review assistant for a rewards task. Analyze the screenshot "
+        "only for the stated task. Do not assume an uploaded image is genuine just because "
+        "it looks plausible. Look for visible UI evidence, target account/channel identity, "
+        "and completion state. Never invent evidence. Return JSON only with exactly these keys: "
+        "status, confidence, reason. status must be one of verified, rejected, needs_review. "
+        "Use verified only when the screenshot clearly shows the requested action and target. "
+        "Use rejected when it clearly contradicts the task or is obviously unrelated. "
+        "Otherwise use needs_review. confidence must be a number from 0 to 1. Keep reason concise.\n\n"
+        f"Task: {task['title']}\n"
+        f"Platform: {task['platform']}\n"
+        f"Criteria: {task['criteria']}"
+    )
+
     payload = {
-        "model": os.environ.get("NOVA_TASK_AI_MODEL", "gpt-5.6-luna"),
-        "input": [
+        "contents": [
             {
                 "role": "user",
-                "content": [
+                "parts": [
+                    {"text": prompt},
                     {
-                        "type": "input_text",
-                        "text": (
-                            "You are an evidence-review assistant for a rewards task. "
-                            "Analyze the screenshot only for the stated task. Do not assume "
-                            "that an uploaded image is genuine just because it looks plausible. "
-                            "Return JSON only with keys: status, confidence, reason. "
-                            "status must be one of verified, rejected, needs_review. "
-                            "Use verified only when the screenshot clearly shows the requested "
-                            "action and target. Use rejected when it clearly contradicts the task. "
-                            "Otherwise use needs_review. Confidence must be a number from 0 to 1.\n\n"
-                            f"Task: {task['title']}\n"
-                            f"Platform: {task['platform']}\n"
-                            f"Criteria: {task['criteria']}"
-                        ),
-                    },
-                    {
-                        "type": "input_image",
-                        "image_url": _data_url(proof_path),
-                        "detail": "high",
+                        "inline_data": {
+                            "mime_type": mime_type,
+                            "data": image_b64,
+                        }
                     },
                 ],
             }
         ],
+        "generationConfig": {
+            "responseMimeType": "application/json",
+            "responseSchema": {
+                "type": "OBJECT",
+                "properties": {
+                    "status": {
+                        "type": "STRING",
+                        "enum": ["verified", "rejected", "needs_review"],
+                    },
+                    "confidence": {"type": "NUMBER"},
+                    "reason": {"type": "STRING"},
+                },
+                "required": ["status", "confidence", "reason"],
+            },
+            "temperature": 0,
+        },
     }
 
+    model = os.environ.get("NOVA_TASK_AI_MODEL", "gemini-2.5-flash-lite").strip()
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+
     request = urllib.request.Request(
-        "https://api.openai.com/v1/responses",
+        url,
         data=json.dumps(payload).encode("utf-8"),
         headers={
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {api_key}",
+            "x-goog-api-key": api_key,
         },
         method="POST",
     )
@@ -125,8 +174,10 @@ def analyze_submission(task_key, proof_path):
         with urllib.request.urlopen(request, timeout=45) as response:
             raw = response.read().decode("utf-8")
         data = json.loads(raw)
-        text = data.get("output_text", "").strip()
-        result = json.loads(text)
+        parts = data.get("candidates", [{}])[0].get("content", {}).get("parts", [])
+        text = "\n".join(part.get("text", "") for part in parts if part.get("text"))
+        result = _extract_json(text)
+
         status = result.get("status", "needs_review")
         if status not in {"verified", "rejected", "needs_review"}:
             status = "needs_review"
@@ -134,7 +185,15 @@ def analyze_submission(task_key, proof_path):
         confidence = max(0.0, min(1.0, confidence))
         reason = str(result.get("reason", "No reason returned."))[:1000]
         return {"status": status, "confidence": confidence, "reason": reason}
-    except (urllib.error.URLError, TimeoutError, ValueError, json.JSONDecodeError, OSError) as exc:
+
+    except urllib.error.HTTPError as exc:
+        # Do not expose API credentials or the provider's full error body to users.
+        return {
+            "status": "needs_review",
+            "confidence": 0.0,
+            "reason": f"AI verification unavailable; manual review required. (HTTP {exc.code})",
+        }
+    except (urllib.error.URLError, TimeoutError, ValueError, json.JSONDecodeError, OSError, IndexError, TypeError) as exc:
         return {
             "status": "needs_review",
             "confidence": 0.0,
