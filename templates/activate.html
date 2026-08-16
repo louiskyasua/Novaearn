@@ -21,8 +21,8 @@
     .account{padding:18px;border:1px solid var(--line);border-radius:16px;background:#f7fffb}
     .account .label{font-size:.78rem;text-transform:uppercase;letter-spacing:.12em;font-weight:900;color:var(--green);margin-bottom:7px}
     .account .number{font-size:1.25rem;font-weight:800}
-    .btn{display:inline-flex;align-items:center;justify-content:center;margin-top:18px;padding:13px 18px;border-radius:12px;background:var(--green);color:white;text-decoration:none;font-weight:850}
     .small{font-size:.9rem}
+    .btn{display:inline-flex;align-items:center;justify-content:center;margin-top:18px;padding:13px 18px;border-radius:12px;background:var(--green);color:white;text-decoration:none;font-weight:850}
     @keyframes spin{to{transform:rotate(360deg)}}
   </style>
 </head>
@@ -43,6 +43,7 @@
           <div class="label">Payment Details</div>
           <div class="number">Payment destination is configured by the administrator.</div>
           <p class="small muted">Use only the payment details displayed through Nova Earn's official, verified payment configuration.</p>
+          <p class="tiny-note">This payment destination can be linked to your Nova Earn account for transaction tracking when properly configured.</p>
         </div>
       </div>
 
@@ -57,16 +58,17 @@
     const details = document.getElementById('details');
 
     const tick = setInterval(function () {
-      remaining -= 1;
       const minutes = Math.floor(remaining / 60);
       const seconds = remaining % 60;
       timer.textContent = minutes + ':' + String(seconds).padStart(2, '0');
 
-      if (remaining <= 0) {
+      if (remaining === 0) {
         clearInterval(tick);
         status.style.display = 'none';
         details.style.display = 'block';
+        return;
       }
+      remaining -= 1;
     }, 1000);
   </script>
 </body>
